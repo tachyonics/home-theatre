@@ -55,7 +55,8 @@ public struct LibraryScanner: Sendable {
             // season. Season detection therefore has to be confirmed by content.
             if let number = FilenameParser.seasonNumber(fromFolderName: name),
                try folderContainsNumberedEpisodes(child) {
-                seasons[number] = try scanSeason(folder: child, number: number, warnings: &warnings)
+                let season = try scanSeason(folder: child, folderNumber: number, warnings: &warnings)
+                insert(season, into: &seasons, series: series.name, warnings: &warnings)
                 continue
             }
 
@@ -67,7 +68,8 @@ public struct LibraryScanner: Sendable {
             if let number = FilenameParser.seasonNumber(fromFolderName: name) {
                 // Looked like a season but held no numbered episodes.
                 warnings.append("\(name) in \(series.name) looks like a season but contains no SxxExx files")
-                seasons[number] = try scanSeason(folder: child, number: number, warnings: &warnings)
+                let season = try scanSeason(folder: child, folderNumber: number, warnings: &warnings)
+                insert(season, into: &seasons, series: series.name, warnings: &warnings)
                 continue
             }
 
@@ -85,13 +87,27 @@ public struct LibraryScanner: Sendable {
 
     // MARK: - Season
 
-    func scanSeason(folder: URL, number: Int, warnings: inout [String]) throws -> Season {
-        var season = Season(number: number, folder: folder)
+    func scanSeason(folder: URL, folderNumber: Int, warnings: inout [String]) throws -> Season {
+        var season = Season(number: folderNumber, folderNumber: folderNumber, folder: folder)
 
         let nfoURL = folder.appendingPathComponent("season.nfo")
         if FileManager.default.fileExists(atPath: nfoURL.path) {
             season.nfoURL = nfoURL
+            if let doc = try? NFODocument.parse(contentsOf: nfoURL) {
+                NFOFields.applySeason(doc, to: &season)
+            } else {
+                warnings.append("\(folder.lastPathComponent)/season.nfo could not be parsed")
+            }
         }
+
+        if season.numberOverriddenByNFO {
+            warnings.append(
+                "\(folder.lastPathComponent) is season \(season.number) per season.nfo, not \(folderNumber) per the folder name"
+            )
+        }
+
+        // Everything below keys off the effective number, not the folder name.
+        let number = season.number
 
         var episodes: [Episode] = []
         var suffixExtras: [(FilenameParser.SuffixExtra, URL)] = []
@@ -181,6 +197,22 @@ public struct LibraryScanner: Sendable {
         episodes.sort { ($0.number ?? 0) < ($1.number ?? 0) }
         season.episodes = episodes
         return season
+    }
+
+    /// Two folders can end up claiming the same season once `<seasonnumber>` is
+    /// honoured. Merge rather than silently dropping one of them.
+    private func insert(_ season: Season, into seasons: inout [Int: Season], series: String, warnings: inout [String]) {
+        guard var existing = seasons[season.number] else {
+            seasons[season.number] = season
+            return
+        }
+        warnings.append(
+            "\(series): \(existing.folder.lastPathComponent) and \(season.folder.lastPathComponent) both resolve to season \(season.number); merged"
+        )
+        existing.episodes += season.episodes
+        existing.extras += season.extras
+        existing.episodes.sort { ($0.number ?? 0) < ($1.number ?? 0) }
+        seasons[season.number] = existing
     }
 
     private func makeEpisode(file: URL, numbering: FilenameParser.EpisodeNumbering) -> Episode {

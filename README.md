@@ -31,7 +31,7 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 15 tests
+swift test          # 20 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
@@ -56,6 +56,10 @@ documentation does not cover them:
 - **`Specials` is ambiguous.** It is both a season-0 folder name and a valid
   extras folder name; content disambiguates — `SxxExx`-named files make it a
   season.
+- **`season.nfo` overrides the folder name.** It lives inside the season folder
+  with root element `<season>` (not `<seasondetails>`), and its `<seasonnumber>`
+  sets the season's index — so a folder named `Season 1` holding
+  `<seasonnumber>2</seasonnumber>` is season 2.
 - **Extras carry no NFO**, so the filename is the on-screen title.
 
 ## Next

@@ -85,6 +85,25 @@ public enum NFOFields {
         if !ids.isEmpty { episode.providerIds = ids }
     }
 
+    /// Applies the `<season>` fields onto a season.
+    ///
+    /// Emby writes this file as `season.nfo` inside the season folder, with root
+    /// element `<season>` — note it is not `<seasondetails>`, unlike episodes.
+    /// `<seasonnumber>` becomes the season's index, so it **overrides the folder
+    /// name**: a folder called `Season 1` holding `<seasonnumber>2</seasonnumber>`
+    /// is season 2 as far as Emby is concerned.
+    public static func applySeason(_ doc: NFODocument, to season: inout Season) {
+        let root = doc.root
+        if let number = root.int("seasonnumber") {
+            season.number = number
+        }
+        season.title = root.string("title") ?? season.title
+        season.locked = root.bool("lockdata") ?? season.locked
+
+        let ids = providerIds(root)
+        if !ids.isEmpty { season.providerIds = ids }
+    }
+
     /// Applies the `<tvshow>` fields onto a series.
     public static func applySeries(_ doc: NFODocument, to series: inout Series) {
         let root = doc.root
