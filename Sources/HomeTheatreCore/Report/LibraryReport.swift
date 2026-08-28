@@ -69,6 +69,17 @@ public struct LibraryReport: Sendable {
             let label = season.number == 0 ? "Specials" : "Season \(season.number)"
             out += "\n  ── \(label) ── (\(season.episodes.count))\n"
 
+            if let scanned = series.seasons.first(where: { $0.number == season.number }) {
+                var notes: [String] = []
+                if let title = scanned.title { notes.append("\"\(title)\"") }
+                notes.append(scanned.nfoURL == nil ? "no season.nfo" : "season.nfo")
+                if scanned.locked { notes.append("locked") }
+                if scanned.numberOverriddenByNFO, let folderNumber = scanned.folderNumber {
+                    notes.append("folder says \(folderNumber), season.nfo says \(scanned.number)")
+                }
+                out += "     " + notes.joined(separator: "   ") + "\n"
+            }
+
             for resolvedEpisode in season.episodes {
                 out += renderEpisode(resolvedEpisode)
             }

@@ -101,21 +101,49 @@ public struct Episode: Sendable, Hashable {
 }
 
 public struct Season: Sendable, Hashable {
+    /// The effective season number. `season.nfo`'s `<seasonnumber>` wins over the
+    /// folder name when the two disagree — Emby reads it into the season's index.
     public var number: Int
+    /// What the folder name alone implied, retained so a disagreement can be shown
+    /// rather than silently resolved.
+    public var folderNumber: Int?
     public var folder: URL
     public var nfoURL: URL?
+    public var title: String?
+    public var locked: Bool
+    public var providerIds: [String: String]
     public var episodes: [Episode]
     public var extras: [Extra]
 
-    public init(number: Int, folder: URL, nfoURL: URL? = nil, episodes: [Episode] = [], extras: [Extra] = []) {
+    public init(
+        number: Int,
+        folderNumber: Int? = nil,
+        folder: URL,
+        nfoURL: URL? = nil,
+        title: String? = nil,
+        locked: Bool = false,
+        providerIds: [String: String] = [:],
+        episodes: [Episode] = [],
+        extras: [Extra] = []
+    ) {
         self.number = number
+        self.folderNumber = folderNumber
         self.folder = folder
         self.nfoURL = nfoURL
+        self.title = title
+        self.locked = locked
+        self.providerIds = providerIds
         self.episodes = episodes
         self.extras = extras
     }
 
     public var isSpecials: Bool { number == 0 }
+
+    /// True when `<seasonnumber>` relocated this season away from its folder name.
+    public var numberOverriddenByNFO: Bool {
+        guard let folderNumber else { return false }
+        return folderNumber != number
+    }
 }
 
 public struct Series: Sendable, Hashable {
