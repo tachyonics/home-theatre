@@ -181,13 +181,34 @@ public struct Series: Sendable, Hashable {
     public var allEpisodes: [Episode] { seasons.flatMap(\.episodes) }
 }
 
+/// What the chosen folder turned out to be.
+///
+/// Pointing the tool at one series rather than the library root is an easy
+/// mistake to make and produces nonsense if assumed away — every `Season NN`
+/// folder comes back as a series. The scanner detects the shape instead.
+public enum ScanMode: Sendable, Hashable {
+    /// One directory per series.
+    case library
+    /// The folder is itself a single series.
+    case singleSeries
+
+    public var description: String {
+        switch self {
+        case .library: "library root"
+        case .singleSeries: "single series folder"
+        }
+    }
+}
+
 public struct LibraryScanResult: Sendable {
     public var root: URL
+    public var mode: ScanMode
     public var series: [Series]
     public var warnings: [String]
 
-    public init(root: URL, series: [Series], warnings: [String] = []) {
+    public init(root: URL, mode: ScanMode = .library, series: [Series], warnings: [String] = []) {
         self.root = root
+        self.mode = mode
         self.series = series
         self.warnings = warnings
     }

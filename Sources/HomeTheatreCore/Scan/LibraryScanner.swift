@@ -16,8 +16,13 @@ public struct LibraryScanner: Sendable {
 
     public func scan(root: URL) throws -> LibraryScanResult {
         var warnings: [String] = []
-        var series: [Series] = []
 
+        if try looksLikeSeriesFolder(root) {
+            let series = try scanSeries(folder: root, warnings: &warnings)
+            return LibraryScanResult(root: root, mode: .singleSeries, series: [series], warnings: warnings)
+        }
+
+        var series: [Series] = []
         for folder in try subdirectories(of: root) {
             do {
                 series.append(try scanSeries(folder: folder, warnings: &warnings))
@@ -27,7 +32,23 @@ public struct LibraryScanner: Sendable {
         }
 
         series.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return LibraryScanResult(root: root, series: series, warnings: warnings)
+        return LibraryScanResult(root: root, mode: .library, series: series, warnings: warnings)
+    }
+
+    /// A series folder announces itself three ways: a `tvshow.nfo`, season
+    /// sub-folders holding numbered episodes, or numbered episodes sitting loose.
+    /// A library root has none of these — its children are series names.
+    func looksLikeSeriesFolder(_ folder: URL) throws -> Bool {
+        if FileManager.default.fileExists(atPath: folder.appendingPathComponent("tvshow.nfo").path) {
+            return true
+        }
+        for child in try subdirectories(of: folder) {
+            if FilenameParser.seasonNumber(fromFolderName: child.lastPathComponent) != nil,
+               try folderContainsNumberedEpisodes(child) {
+                return true
+            }
+        }
+        return try folderContainsNumberedEpisodes(folder)
     }
 
     // MARK: - Series
@@ -76,9 +97,47 @@ public struct LibraryScanner: Sendable {
             series.unassigned += try videoFiles(in: child, recursive: true)
         }
 
-        // Loose files directly under the series folder.
+        // Episodes can sit directly in the series folder with no season sub-folders
+        // at all. Group those by season rather than dumping them as unassigned.
+        var looseEpisodes: [Episode] = []
+        var looseSuffixExtras: [(FilenameParser.SuffixExtra, URL)] = []
+
         for file in try videoFiles(in: folder, recursive: false) {
-            series.unassigned.append(file)
+            if let suffix = FilenameParser.suffixExtra(fromFilename: file.lastPathComponent) {
+                looseSuffixExtras.append((suffix, file))
+            } else if let numbering = FilenameParser.episodeNumbering(from: file.lastPathComponent) {
+                looseEpisodes.append(makeEpisode(file: file, numbering: numbering))
+            } else {
+                series.unassigned.append(file)
+            }
+        }
+
+        for (suffix, file) in looseSuffixExtras {
+            let ownerStem = suffix.ownerStem.lowercased()
+            if let index = looseEpisodes.firstIndex(where: {
+                $0.file.deletingPathExtension().lastPathComponent.lowercased() == ownerStem
+            }) {
+                let owner = looseEpisodes[index]
+                looseEpisodes[index].extras.append(
+                    Extra(
+                        file: file,
+                        type: suffix.type,
+                        parent: .episode(season: owner.season ?? 0, number: owner.number ?? 0),
+                        title: FilenameParser.extraTitle(for: file)
+                    )
+                )
+            } else {
+                series.unassigned.append(file)
+            }
+        }
+
+        for (number, grouped) in Dictionary(grouping: looseEpisodes, by: { $0.season ?? 0 }) {
+            let loose = Season(
+                number: number,
+                folder: folder,
+                episodes: grouped.sorted { ($0.number ?? 0) < ($1.number ?? 0) }
+            )
+            insert(loose, into: &seasons, series: series.name, warnings: &warnings)
         }
 
         series.seasons = seasons.values.sorted { $0.number < $1.number }
