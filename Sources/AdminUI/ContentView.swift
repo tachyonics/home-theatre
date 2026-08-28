@@ -57,7 +57,7 @@ struct ContentView: View {
 
     private var outputView: some View {
         ScrollView([.vertical, .horizontal]) {
-            Text(output.isEmpty ? "Choose a TV library folder to scan.\n\nThe scan reproduces how Emby interprets the tree: episodes, extras and their parents, and the display sequence a client would render." : output)
+            Text(output.isEmpty ? "Choose a TV library root, or a single series folder — either is detected.\n\nThe scan reproduces how Emby interprets the tree: episodes, extras and their parents, and the display sequence a client would render." : output)
                 .font(.system(.body, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,7 +72,7 @@ struct ContentView: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Scan"
-        panel.message = "Select the root of a TV library — the folder containing one directory per series."
+        panel.message = "Select a TV library root, or a single series folder — either is detected."
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         libraryPath = url

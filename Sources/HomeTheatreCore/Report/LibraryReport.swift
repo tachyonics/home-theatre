@@ -17,7 +17,8 @@ public struct LibraryReport: Sendable {
         let resolver = DisplayOrderResolver()
         var out = ""
 
-        out += "Library: \(result.root.path)\n"
+        out += "Path:    \(result.root.path)\n"
+        out += "Read as: \(result.mode.description)\n"
         out += "Series:  \(result.series.count)\n"
 
         let episodeCount = result.series.reduce(0) { $0 + $1.allEpisodes.count }
