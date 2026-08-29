@@ -31,7 +31,7 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 34 tests
+swift test          # 39 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
@@ -48,6 +48,12 @@ role, with the file's raw source underneath. Tags Emby would silently ignore are
 struck through and labelled, so an `<airsbefore_season>` overwritten by a later
 `<displayseason>`, or a `<displayepisode>0</displayepisode>` rejected for being
 non-positive, are visible rather than mysterious.
+
+A bottom drawer lists the extras for the same selection — types on the left,
+extras on the right. Scope is the selected item **and everything beneath it**,
+each row labelled with its real owner, so a series whose extras all hang off
+episodes does not present as empty. The details drawer keeps full window height
+beside both.
 
 Either a library root (one directory per series) or a single series folder works;
 the scanner detects which it was given, and the Auto/Library/Series control
