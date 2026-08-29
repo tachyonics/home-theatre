@@ -73,6 +73,35 @@ final class ScanModeTests: XCTestCase {
         XCTAssertEqual(series.unassigned.map(\.lastPathComponent), ["Some Documentary.mkv"])
     }
 
+    /// Forcing library mode on a series folder is how you recover from a misread
+    /// in the other direction — the seasons come back as series, deliberately.
+    func testForcingLibraryModeOverridesDetection() throws {
+        try touch("Season 01/Show S01E01.mkv")
+        try touch("Season 02/Show S02E01.mkv")
+
+        let result = try LibraryScanner().scan(root: root, forcing: .library)
+
+        XCTAssertEqual(result.mode, .library)
+        XCTAssertEqual(result.series.map(\.name), ["Season 01", "Season 02"])
+    }
+
+    func testForcingSeriesModeOverridesDetection() throws {
+        try touch("Doctor Who (2005)/Season 01/Doctor Who S01E01.mkv")
+        try touch("Fawlty Towers/Season 01/Fawlty Towers S01E01.mkv")
+
+        // Detection would call this a library; forcing treats the folder as one
+        // series, which is the escape hatch for unconventional season naming.
+        let result = try LibraryScanner().scan(root: root, forcing: .singleSeries)
+
+        XCTAssertEqual(result.mode, .singleSeries)
+        XCTAssertEqual(result.series.count, 1)
+    }
+
+    func testDetectionIsUnchangedWhenNoModeIsForced() throws {
+        try touch("Season 01/Show S01E01.mkv")
+        XCTAssertEqual(try LibraryScanner().scan(root: root, forcing: nil).mode, .singleSeries)
+    }
+
     func testReportNamesTheMode() throws {
         try touch("Season 01/Show S01E01.mkv")
         XCTAssertTrue(LibraryReport().render(try LibraryScanner().scan(root: root))

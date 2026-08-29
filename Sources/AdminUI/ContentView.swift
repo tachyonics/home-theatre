@@ -8,6 +8,26 @@ struct ContentView: View {
     @State private var output = ""
     @State private var isScanning = false
     @State private var summary: String?
+    @State private var modeSelection: ModeSelection = .auto
+
+    /// Detection is right nearly always, so it stays the default. The override is
+    /// here for the case it cannot call — a series folder with unconventional
+    /// season names reads as a library, and nothing in the tree says otherwise.
+    enum ModeSelection: String, CaseIterable, Identifiable {
+        case auto = "Auto"
+        case library = "Library"
+        case series = "Series"
+
+        var id: String { rawValue }
+
+        var forced: ScanMode? {
+            switch self {
+            case .auto: nil
+            case .library: .library
+            case .series: .singleSeries
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,6 +42,16 @@ struct ContentView: View {
         HStack(spacing: 12) {
             Button("Choose Library Folder…", action: chooseFolder)
                 .disabled(isScanning)
+
+            Picker("Read as", selection: $modeSelection) {
+                ForEach(ModeSelection.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .disabled(libraryPath == nil || isScanning)
+            .onChange(of: modeSelection) { if let libraryPath { scan(libraryPath) } }
+            .help("Auto detects whether the folder is a library root or one series. Override if it guesses wrong.")
 
             Button("Rescan") { if let libraryPath { scan(libraryPath) } }
                 .disabled(libraryPath == nil || isScanning)
@@ -76,6 +106,8 @@ struct ContentView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         libraryPath = url
+        // A new folder gets a fresh detection rather than inheriting the last override.
+        modeSelection = .auto
         scan(url)
     }
 
@@ -83,11 +115,12 @@ struct ContentView: View {
         isScanning = true
         summary = nil
         output = ""
+        let forced = modeSelection.forced
 
         Task {
             let result = await Task.detached(priority: .userInitiated) { () -> Result<String, any Error> in
                 do {
-                    let scan = try LibraryScanner().scan(root: url)
+                    let scan = try LibraryScanner().scan(root: url, forcing: forced)
                     let text = LibraryReport().render(scan)
                     return .success(text)
                 } catch {

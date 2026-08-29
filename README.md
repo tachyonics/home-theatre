@@ -31,14 +31,15 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 25 tests
+swift test          # 28 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
 `AdminUI` is currently read-only: choose a folder and it prints how the tree
 resolves — episodes in display order, extras and their parents, and anything it
 could not place. Either a library root (one directory per series) or a single
-series folder works; the scanner detects which it was given and says so.
+series folder works; the scanner detects which it was given and says so, and the
+Auto/Library/Series control overrides it when detection cannot tell.
 
 ## The rules this encodes
 
