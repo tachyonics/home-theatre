@@ -80,6 +80,12 @@ final class DoctorWhoFixtureTests: XCTestCase {
         XCTAssertEqual(series.providerIds["Tvdb"], "78804")
         XCTAssertEqual(series.extras.count, 2)
         XCTAssertEqual(Set(series.extras.map(\.type)), [.behindTheScenes, .interview])
+        // Folder-derived extras record where they are filed; suffix-derived ones
+        // sit in no extras folder and record nothing.
+        XCTAssertEqual(
+            Set(series.extras.compactMap(\.folderName)),
+            ["behind the scenes", "interviews"]
+        )
 
         // Season 1 holds 13 episodes: 12 loose plus the one in its own folder.
         let seasonOne = try XCTUnwrap(series.seasons.first { $0.number == 1 })
@@ -94,6 +100,7 @@ final class DoctorWhoFixtureTests: XCTestCase {
         let first = try XCTUnwrap(seasonOne.episodes.first { $0.number == 1 })
         XCTAssertEqual(first.extras.count, 1)
         XCTAssertEqual(first.extras.first?.type, .behindTheScenes)
+        XCTAssertNil(first.extras.first?.folderName, "bound by suffix, so filed in no folder")
 
         // Merged two-parter keeps its span and carries its extra.
         let seasonFive = try XCTUnwrap(series.seasons.first { $0.number == 5 })

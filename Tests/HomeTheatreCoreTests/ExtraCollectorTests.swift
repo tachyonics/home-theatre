@@ -80,3 +80,65 @@ final class ExtraCollectorTests: XCTestCase {
         XCTAssertFalse(counts.contains { $0.type == .trailer }, "absent types are not offered")
     }
 }
+
+/// The folder list doubles as the set of drop destinations, so it is fixed rather
+/// than derived from what happens to be present.
+final class ExtrasFolderTests: XCTestCase {
+    func testEveryDocumentedFolderIsOfferedInOrder() {
+        XCTAssertEqual(
+            ExtrasFolder.all.map(\.name),
+            [
+                "extras", "specials", "shorts", "scenes", "featurettes",
+                "behind the scenes", "deleted scenes", "interviews", "trailers",
+            ]
+        )
+    }
+
+    /// `extras` and `specials` share a type, so a type-keyed list would merge two
+    /// destinations that are distinct on disk.
+    func testExtrasAndSpecialsShareATypeButStayDistinct() {
+        let extras = try! XCTUnwrap(ExtrasFolder.named("extras"))
+        let specials = try! XCTUnwrap(ExtrasFolder.named("specials"))
+
+        XCTAssertEqual(extras.type, specials.type)
+        XCTAssertNotEqual(extras, specials)
+    }
+
+    func testFolderNamesStayInSyncWithTheCanonicalList() {
+        XCTAssertEqual(ExtraType.folderNames.count, ExtrasFolder.all.count)
+        for folder in ExtrasFolder.all {
+            XCTAssertEqual(ExtraType.folderNames[folder.name], folder.type, folder.name)
+        }
+    }
+
+    func testNamedIsCaseAndWhitespaceInsensitive() {
+        XCTAssertEqual(ExtrasFolder.named("Behind The Scenes")?.name, "behind the scenes")
+        XCTAssertEqual(ExtrasFolder.named(" Trailers ")?.name, "trailers")
+        XCTAssertNil(ExtrasFolder.named("Season 1"))
+    }
+
+    func testCountsCoverEmptyFoldersAndTheSuffixBucket() {
+        let inFolder = Extra(
+            file: URL(fileURLWithPath: "/tmp/interviews/a.mkv"),
+            type: .interview,
+            parent: .series,
+            title: "a",
+            folderName: "interviews"
+        )
+        let viaSuffix = Extra(
+            file: URL(fileURLWithPath: "/tmp/Show S01E01-deleted.mkv"),
+            type: .deletedScene,
+            parent: .episode(season: 1, number: 1),
+            title: "b"
+        )
+        let owned = [inFolder, viaSuffix].map { OwnedExtra(extra: $0, ownerLabel: "x", isDirect: true) }
+
+        let counts = ExtraCollector.countsByFolder(owned)
+
+        XCTAssertEqual(counts.folders.count, 9, "every folder is listed, populated or not")
+        XCTAssertEqual(counts.folders.first { $0.folder.name == "interviews" }?.count, 1)
+        XCTAssertEqual(counts.folders.first { $0.folder.name == "trailers" }?.count, 0)
+        XCTAssertEqual(counts.suffixCount, 1)
+        XCTAssertEqual(ExtraCollector.filing(of: viaSuffix), .filenameSuffix)
+    }
+}

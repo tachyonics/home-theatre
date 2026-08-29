@@ -35,7 +35,7 @@ struct ContentView: View {
     @State private var inspectorPresented = true
     @State private var extrasPresented = false
     @State private var extrasHeight: CGFloat = 240
-    @State private var selectedExtraType: ExtraType?
+    @State private var extrasFilter: ExtrasDrawer.ExtrasFilter = .all
     @State private var inspection: NFOInspection?
     @State private var inspectionError: String?
 
@@ -77,7 +77,7 @@ struct ContentView: View {
 
             if extrasPresented {
                 ExtrasResizeHandle(height: $extrasHeight)
-                ExtrasDrawer(target: inspectorTarget, selectedType: $selectedExtraType)
+                ExtrasDrawer(target: inspectorTarget, selection: $extrasFilter)
                     .frame(height: extrasHeight)
             }
         }
@@ -89,8 +89,9 @@ struct ContentView: View {
         .sheet(isPresented: $showingReport) { reportSheet }
         .onChange(of: inspectorTarget) {
             loadInspection()
-            // A type filter from the previous item may not exist for this one.
-            selectedExtraType = nil
+            // The folder list is fixed, but a filter narrowing to an empty folder
+            // reads as a bug when the selection changes underneath it.
+            extrasFilter = .all
         }
         .task(id: payloadStamp) { loadInspection() }
         .task {

@@ -31,7 +31,7 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 39 tests
+swift test          # 44 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
@@ -49,8 +49,11 @@ struck through and labelled, so an `<airsbefore_season>` overwritten by a later
 `<displayseason>`, or a `<displayepisode>0</displayepisode>` rejected for being
 non-positive, are visible rather than mysterious.
 
-A bottom drawer lists the extras for the same selection — types on the left,
-extras on the right. Scope is the selected item **and everything beneath it**,
+A bottom drawer lists the extras for the same selection. The left pane is a
+fixed list of the nine extras folders Emby recognises — shown whether or not they
+currently hold anything, because it is also the set of places an extra can be
+filed — plus a bucket for extras bound by filename suffix, which sit in no folder
+at all. Scope is the selected item **and everything beneath it**,
 each row labelled with its real owner, so a series whose extras all hang off
 episodes does not present as empty. The details drawer keeps full window height
 beside both.

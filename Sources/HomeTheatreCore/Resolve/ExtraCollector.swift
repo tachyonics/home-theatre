@@ -71,6 +71,42 @@ public enum ExtraCollector {
         }
     }
 
+    /// How an extra is filed. Every recognised folder is a case whether or not it
+    /// currently holds anything, because the list is also the set of places an
+    /// extra can be dropped.
+    public enum Filing: Sendable, Hashable {
+        case folder(String)
+        /// Bound by a filename suffix, so it sits in no extras folder.
+        case filenameSuffix
+    }
+
+    public static func filing(of extra: Extra) -> Filing {
+        if let folderName = extra.folderName { .folder(folderName) } else { .filenameSuffix }
+    }
+
+    /// Counts for every canonical folder, in Emby's documented order, plus the
+    /// suffix bucket. Folders holding nothing come back with a count of zero
+    /// rather than being omitted.
+    public static func countsByFolder(_ extras: [OwnedExtra]) -> (
+        folders: [(folder: ExtrasFolder, count: Int)],
+        suffixCount: Int
+    ) {
+        var counts: [String: Int] = [:]
+        var suffixCount = 0
+
+        for owned in extras {
+            switch filing(of: owned.extra) {
+            case .folder(let name): counts[name, default: 0] += 1
+            case .filenameSuffix: suffixCount += 1
+            }
+        }
+
+        return (
+            folders: ExtrasFolder.all.map { (folder: $0, count: counts[$0.name] ?? 0) },
+            suffixCount: suffixCount
+        )
+    }
+
     /// Counts per type, for a type list that only offers types actually present.
     public static func countsByType(_ extras: [OwnedExtra]) -> [(type: ExtraType, count: Int)] {
         Dictionary(grouping: extras, by: \.extra.type)

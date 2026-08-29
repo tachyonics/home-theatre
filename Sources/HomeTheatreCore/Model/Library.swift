@@ -29,12 +29,16 @@ public struct Extra: Sendable, Hashable {
     /// Extras get no NFO of their own — Emby derives the on-screen title from the
     /// filename, so this is the display title.
     public var title: String
+    /// The recognised extras folder this sits in, or `nil` when it was bound by a
+    /// filename suffix instead and therefore lives in no extras folder at all.
+    public var folderName: String?
 
-    public init(file: URL, type: ExtraType, parent: ExtraParent, title: String) {
+    public init(file: URL, type: ExtraType, parent: ExtraParent, title: String, folderName: String? = nil) {
         self.file = file
         self.type = type
         self.parent = parent
         self.title = title
+        self.folderName = folderName
     }
 }
 
