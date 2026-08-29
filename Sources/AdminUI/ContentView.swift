@@ -23,6 +23,15 @@ struct ContentView: View {
     @State private var selectedEpisode: URL?
     @State private var showingReport = false
 
+    /// Which column was last interacted with.
+    ///
+    /// This cannot be inferred from the selections: choosing a series immediately
+    /// auto-selects its first season so the episode pane is not empty, which would
+    /// make a "most specific selection wins" rule never resolve to the series.
+    @State private var focus: Focus = .series
+
+    enum Focus { case series, season, episode }
+
     @State private var inspectorPresented = true
     @State private var inspection: NFOInspection?
     @State private var inspectionError: String?
@@ -48,13 +57,13 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            SeriesColumn(series: payload?.resolved ?? [], selection: $selectedSeries)
+            SeriesColumn(series: payload?.resolved ?? [], selection: seriesSelection)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } content: {
-            SeasonColumn(series: currentSeries, selection: $selectedSeason)
+            SeasonColumn(series: currentSeries, selection: seasonSelection)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
-            EpisodeColumn(series: currentSeries, season: currentSeason, selection: $selectedEpisode)
+            EpisodeColumn(series: currentSeries, season: currentSeason, selection: episodeSelection)
         }
         .inspector(isPresented: $inspectorPresented) {
             InspectorView(target: inspectorTarget, inspection: inspection, loadError: inspectionError)
@@ -62,19 +71,45 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .overlay { emptyState }
         .sheet(isPresented: $showingReport) { reportSheet }
-        .onChange(of: selectedSeries) {
-            selectedSeason = defaultSeason
-            selectedEpisode = nil
-        }
-        // Stepping back out to a season should describe the season, not whichever
-        // episode happened to be selected underneath it.
-        .onChange(of: selectedSeason) { selectedEpisode = nil }
         .onChange(of: inspectorTarget) { loadInspection() }
         .task(id: payloadStamp) { loadInspection() }
         .frame(minWidth: 900, minHeight: 560)
     }
 
     // MARK: - Derived state
+
+    private var seriesSelection: Binding<URL?> {
+        Binding {
+            selectedSeries
+        } set: { newValue in
+            selectedSeries = newValue
+            focus = .series
+            // Populate the episode pane, without claiming the user asked for it.
+            selectedSeason = payload?.resolved
+                .first { $0.series.folder == newValue }?
+                .seasons.first?.number
+            selectedEpisode = nil
+        }
+    }
+
+    private var seasonSelection: Binding<Int?> {
+        Binding {
+            selectedSeason
+        } set: { newValue in
+            selectedSeason = newValue
+            focus = .season
+            selectedEpisode = nil
+        }
+    }
+
+    private var episodeSelection: Binding<URL?> {
+        Binding {
+            selectedEpisode
+        } set: { newValue in
+            selectedEpisode = newValue
+            focus = newValue == nil ? .season : .episode
+        }
+    }
 
     private var currentSeries: ResolvedSeries? {
         guard let selectedSeries else { return nil }
@@ -96,11 +131,15 @@ struct ContentView: View {
         return currentSeason?.episodes.first { $0.episode.file == selectedEpisode }
     }
 
-    /// Most specific selection wins.
+    /// Follows the focused column, falling back outward when the focused level has
+    /// nothing selected.
     private var inspectorTarget: InspectorTarget? {
         guard let currentSeries else { return nil }
-        if let currentEpisode { return .episode(currentEpisode) }
-        if let currentSeason {
+
+        if focus == .episode, let currentEpisode {
+            return .episode(currentEpisode)
+        }
+        if focus != .series, let currentSeason {
             let scanned = currentSeries.series.seasons.first { $0.number == currentSeason.number }
             return .season(series: currentSeries, season: currentSeason, scanned: scanned)
         }
@@ -284,6 +323,7 @@ struct ContentView: View {
                 }
                 selectedSeason = defaultSeason
                 selectedEpisode = nil
+                focus = .series
             case .failure(let error):
                 payload = nil
                 scanError = "\(error)"
