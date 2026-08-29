@@ -6,7 +6,16 @@ import SwiftUI
 /// chosen type. Scope follows the same target as the details drawer.
 struct ExtrasDrawer: View {
     let target: InspectorTarget?
-    @Binding var selectedType: ExtraType?
+    @Binding var selection: ExtrasFilter
+
+    /// The left pane is a fixed list of destinations, not a summary of what is
+    /// present — every recognised folder stays visible so an extra can be filed
+    /// into an empty one.
+    enum ExtrasFilter: Hashable {
+        case all
+        case folder(String)
+        case filenameSuffix
+    }
 
     private var extras: [OwnedExtra] {
         guard let target else { return [] }
@@ -21,67 +30,73 @@ struct ExtrasDrawer: View {
         }
     }
 
-    private var counts: [(type: ExtraType, count: Int)] {
-        ExtraCollector.countsByType(extras)
-    }
-
     private var visible: [OwnedExtra] {
-        guard let selectedType else { return extras }
-        return extras.filter { $0.extra.type == selectedType }
+        switch selection {
+        case .all:
+            extras
+        case .folder(let name):
+            extras.filter { $0.extra.folderName == name }
+        case .filenameSuffix:
+            extras.filter { $0.extra.folderName == nil }
+        }
     }
 
     var body: some View {
         HSplitView {
-            typeList
-                .frame(minWidth: 170, idealWidth: 200, maxWidth: 280)
+            folderList
+                .frame(minWidth: 190, idealWidth: 210, maxWidth: 300)
             extraList
                 .frame(minWidth: 300, maxWidth: .infinity)
         }
-        .frame(minHeight: 120)
-        .overlay {
-            if extras.isEmpty {
-                ContentUnavailableView(
-                    "No extras",
-                    systemImage: "paperclip",
-                    description: emptyDescription
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: - Destinations
+
+    private var folderList: some View {
+        let counts = ExtraCollector.countsByFolder(extras)
+
+        return List(selection: $selection) {
+            Section("Extras") {
+                row(label: "All", systemImage: "square.stack", count: extras.count)
+                    .tag(ExtrasFilter.all)
+
+                ForEach(counts.folders, id: \.folder.id) { entry in
+                    row(
+                        label: entry.folder.displayName,
+                        systemImage: "folder",
+                        count: entry.count,
+                        dimmed: entry.count == 0
+                    )
+                    .tag(ExtrasFilter.folder(entry.folder.name))
+                    .help("Files in a “\(entry.folder.name)” folder become \(entry.folder.type.displayName) extras.")
+                }
+
+                // Suffix-bound extras belong to no folder, so they need a home in
+                // this list or they would be unreachable from it.
+                row(
+                    label: "By filename suffix",
+                    systemImage: "textformat",
+                    count: counts.suffixCount,
+                    dimmed: counts.suffixCount == 0
                 )
-                .background(.background)
+                .tag(ExtrasFilter.filenameSuffix)
+                .help("Bound to a sibling item by a suffix such as “-behindthescenes”.")
             }
         }
     }
 
-    private var emptyDescription: Text {
-        switch target {
-        case .episode:
-            Text("Nothing sits beside this episode. Extras bind by filename suffix or an SxxExx folder.")
-        case .season, .series, .none:
-            Text("Extras are recognised from folder names such as “behind the scenes”, or a filename suffix like “-deleted”.")
+    private func row(label: String, systemImage: String, count: Int, dimmed: Bool = false) -> some View {
+        HStack {
+            Label(label, systemImage: systemImage)
+                .lineLimit(1)
+            Spacer()
+            Text("\(count)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
-    }
-
-    // MARK: - Types
-
-    private var typeList: some View {
-        List(selection: $selectedType) {
-            Section("Type") {
-                // Tagged nil so clearing the filter is a normal selection.
-                HStack {
-                    Label("All", systemImage: "square.stack")
-                    Spacer()
-                    Text("\(extras.count)").foregroundStyle(.secondary).font(.caption)
-                }
-                .tag(ExtraType?.none)
-
-                ForEach(counts, id: \.type) { entry in
-                    HStack {
-                        Text(entry.type.displayName)
-                        Spacer()
-                        Text("\(entry.count)").foregroundStyle(.secondary).font(.caption)
-                    }
-                    .tag(ExtraType?.some(entry.type))
-                }
-            }
-        }
+        .foregroundStyle(dimmed ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
     }
 
     // MARK: - Extras
@@ -96,12 +111,11 @@ struct ExtrasDrawer: View {
     private var extraList: some View {
         Table(visible.map(Row.init)) {
             TableColumn("Title") { row in
-                let owned = row.owned
                 // Extras carry no NFO, so this filename is the on-screen title.
-                Text(owned.extra.title)
+                Text(row.owned.extra.title)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(owned.extra.file.path)
+                    .help(row.owned.extra.file.path)
             }
             TableColumn("Type") { row in
                 Text(row.owned.extra.type.displayName).foregroundStyle(.secondary)
@@ -112,17 +126,16 @@ struct ExtrasDrawer: View {
                     .foregroundStyle(row.owned.isDirect ? .primary : .secondary)
             }
             .width(min: 90, ideal: 110)
-            TableColumn("File") { row in
-                Text(row.owned.extra.file.lastPathComponent)
-                    .font(.system(.caption, design: .monospaced))
+            TableColumn("Filed under") { row in
+                Text(row.owned.extra.folderName ?? "filename suffix")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
             }
+            .width(min: 100, ideal: 130)
         }
     }
 }
-
 
 /// Replaces what VSplitView would have given us, without letting it renegotiate
 /// the widths of the browsing columns above.

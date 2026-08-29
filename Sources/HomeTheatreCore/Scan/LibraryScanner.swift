@@ -300,8 +300,15 @@ public struct LibraryScanner: Sendable {
     // MARK: - Filesystem helpers
 
     private func extras(in folder: URL, type: ExtraType, parent: ExtraParent) throws -> [Extra] {
-        try videoFiles(in: folder, recursive: false).map { file in
-            Extra(file: file, type: type, parent: parent, title: FilenameParser.extraTitle(for: file))
+        let folderName = ExtrasFolder.named(folder.lastPathComponent)?.name
+        return try videoFiles(in: folder, recursive: false).map { file in
+            Extra(
+                file: file,
+                type: type,
+                parent: parent,
+                title: FilenameParser.extraTitle(for: file),
+                folderName: folderName
+            )
         }
     }
 

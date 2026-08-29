@@ -18,18 +18,10 @@ public enum ExtraType: String, Sendable, Hashable, CaseIterable {
     case short
 
     /// The extras sub-folder names Emby recognises, mapped to the type they imply.
-    /// Folders must sit directly under the item's folder — nested folders are not supported.
-    public static let folderNames: [String: ExtraType] = [
-        "extras": .unknown,
-        "specials": .unknown,
-        "shorts": .short,
-        "scenes": .scene,
-        "featurettes": .featurette,
-        "behind the scenes": .behindTheScenes,
-        "deleted scenes": .deletedScene,
-        "interviews": .interview,
-        "trailers": .trailer,
-    ]
+    /// Derived from ``ExtrasFolder/all`` so there is one list, not two.
+    public static let folderNames: [String: ExtraType] = Dictionary(
+        uniqueKeysWithValues: ExtrasFolder.all.map { ($0.name, $0.type) }
+    )
 
     /// Filename suffixes that bind an extra to the sibling media file sharing its stem.
     /// Longest-match-first matters: `-deletedscene` must be tested before `-deleted`.
@@ -72,4 +64,48 @@ public enum ExtraParent: Sendable, Hashable {
     case series
     case season(Int)
     case episode(season: Int, number: Int)
+}
+
+
+/// A recognised extras sub-folder.
+///
+/// This, not ``ExtraType``, is the unit an extra is filed under: `extras` and
+/// `specials` both resolve to ``ExtraType/unknown``, so a list keyed by type would
+/// merge two destinations that are distinct on disk. Placing an extra means moving
+/// a file into one of these folders, so the folder is the identity that matters.
+///
+/// Folders sit directly under the item's own folder — nested folders are not
+/// supported — and the order here is the order Emby documents them in.
+public struct ExtrasFolder: Sendable, Hashable, Identifiable {
+    public var name: String
+    public var type: ExtraType
+
+    public var id: String { name }
+
+    public init(name: String, type: ExtraType) {
+        self.name = name
+        self.type = type
+    }
+
+    public static let all: [ExtrasFolder] = [
+        ExtrasFolder(name: "extras", type: .unknown),
+        ExtrasFolder(name: "specials", type: .unknown),
+        ExtrasFolder(name: "shorts", type: .short),
+        ExtrasFolder(name: "scenes", type: .scene),
+        ExtrasFolder(name: "featurettes", type: .featurette),
+        ExtrasFolder(name: "behind the scenes", type: .behindTheScenes),
+        ExtrasFolder(name: "deleted scenes", type: .deletedScene),
+        ExtrasFolder(name: "interviews", type: .interview),
+        ExtrasFolder(name: "trailers", type: .trailer),
+    ]
+
+    public static func named(_ name: String) -> ExtrasFolder? {
+        let lowered = name.lowercased().trimmingCharacters(in: .whitespaces)
+        return all.first { $0.name == lowered }
+    }
+
+    /// Title case for display, leaving the on-disk name untouched.
+    public var displayName: String {
+        name.split(separator: " ").map(\.capitalized).joined(separator: " ")
+    }
 }
