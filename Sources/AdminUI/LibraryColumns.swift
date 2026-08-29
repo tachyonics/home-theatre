@@ -128,13 +128,16 @@ private struct SeasonRow: View {
 struct EpisodeColumn: View {
     let series: ResolvedSeries?
     let season: ResolvedSeason?
+    @Binding var selection: URL?
 
     var body: some View {
         Group {
             if let season {
-                List {
+                List(selection: $selection) {
                     Section("Display order") {
-                        ForEach(season.episodes, id: \.episode.file) { EpisodeRow(resolved: $0) }
+                        ForEach(season.episodes, id: \.episode.file) { resolved in
+                            EpisodeRow(resolved: resolved).tag(resolved.episode.file)
+                        }
                     }
 
                     if let extras = seasonExtras, !extras.isEmpty {
