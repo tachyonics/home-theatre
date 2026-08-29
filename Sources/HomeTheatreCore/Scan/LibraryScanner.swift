@@ -14,10 +14,14 @@ public struct LibraryScanner: Sendable {
         self.followSymlinks = followSymlinks
     }
 
-    public func scan(root: URL) throws -> LibraryScanResult {
+    /// - Parameter forcedMode: `nil` detects the shape, which is right nearly
+    ///   always. Pass a mode to override a misread — a series folder whose seasons
+    ///   are named unconventionally reads as a library and turns its seasons into
+    ///   series, and there is no signal the scanner can use to know better.
+    public func scan(root: URL, forcing forcedMode: ScanMode? = nil) throws -> LibraryScanResult {
         var warnings: [String] = []
 
-        if try looksLikeSeriesFolder(root) {
+        if try forcedMode == .singleSeries || (forcedMode == nil && looksLikeSeriesFolder(root)) {
             let series = try scanSeries(folder: root, warnings: &warnings)
             return LibraryScanResult(root: root, mode: .singleSeries, series: [series], warnings: warnings)
         }
