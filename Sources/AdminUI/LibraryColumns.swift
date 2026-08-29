@@ -22,13 +22,16 @@ private struct SeriesRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(resolved.series.name).lineLimit(2)
+            Text(resolved.series.name)
+                .lineLimit(3)
+                // Wrap to the column width rather than truncating a long title.
+                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 6) {
-                Text("\(resolved.seasons.count) seasons · \(resolved.episodeCount) episodes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Text("\(resolved.seasons.count) seasons · \(resolved.episodeCount) episodes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
+            HStack(spacing: 4) {
                 // Only worth surfacing when it is not the default, since a series
                 // with no <displayorder> behaves as aired anyway.
                 if let order = resolved.series.displayOrder, order != .aired {
@@ -39,6 +42,7 @@ private struct SeriesRow: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
     }
 }
@@ -99,11 +103,11 @@ private struct SeasonRow: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(season.number == 0 ? "Specials" : "Season \(season.number)")
 
-            HStack(spacing: 6) {
-                Text("\(season.episodes.count) episodes")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Text("\(season.episodes.count) episodes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
+            HStack(spacing: 4) {
                 if let scanned {
                     if scanned.nfoURL == nil {
                         Badge("no nfo", tone: .warning)
@@ -119,6 +123,7 @@ private struct SeasonRow: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 2)
     }
 }
@@ -179,7 +184,9 @@ private struct EpisodeRow: View {
                 Text(resolved.episode.identityLabel)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .frame(width: 90, alignment: .leading)
+                    // minWidth, not width: S05E12-E13 is wider than S01E01.
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: 90, alignment: .leading)
 
                 Text(resolved.episode.title ?? resolved.episode.file.lastPathComponent)
                     .lineLimit(1)
@@ -187,11 +194,12 @@ private struct EpisodeRow: View {
 
                 Spacer(minLength: 8)
 
-                badges
+                // The title gives way first; badges are short and load-bearing.
+                badges.layoutPriority(1)
             }
 
             ForEach(resolved.episode.extras, id: \.file) { extra in
-                ExtraRow(extra: extra).padding(.leading, 128)
+                ExtraRow(extra: extra).padding(.leading, 132)
             }
         }
         .padding(.vertical, 3)

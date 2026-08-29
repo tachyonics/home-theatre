@@ -34,6 +34,7 @@ struct ContentView: View {
 
     @State private var inspectorPresented = true
     @State private var extrasPresented = false
+    @State private var extrasHeight: CGFloat = 240
     @State private var selectedExtraType: ExtraType?
     @State private var inspection: NFOInspection?
     @State private var inspectionError: String?
@@ -58,23 +59,26 @@ struct ContentView: View {
     }
 
     var body: some View {
-        // The extras drawer splits the browsing area only, so the details drawer
-        // keeps the full height of the window beside both.
-        VSplitView {
+        // A plain stack, not a VSplitView: VSplitView negotiates widths with its
+        // children and squeezed the sidebar below its stated minimum, so the
+        // series column collapsed and clipped its rows.
+        VStack(spacing: 0) {
             NavigationSplitView {
                 SeriesColumn(series: payload?.resolved ?? [], selection: seriesSelection)
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 280)
+                    .navigationSplitViewColumnWidth(min: 240, ideal: 300)
             } content: {
                 SeasonColumn(series: currentSeries, selection: seasonSelection)
                     .navigationSplitViewColumnWidth(min: 220, ideal: 260)
             } detail: {
                 EpisodeColumn(series: currentSeries, season: currentSeason, selection: episodeSelection)
             }
-            .frame(minHeight: 240)
+            .navigationSplitViewStyle(.balanced)
+            .frame(maxHeight: .infinity)
 
             if extrasPresented {
+                ExtrasResizeHandle(height: $extrasHeight)
                 ExtrasDrawer(target: inspectorTarget, selectedType: $selectedExtraType)
-                    .frame(idealHeight: 220)
+                    .frame(height: extrasHeight)
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -89,6 +93,16 @@ struct ContentView: View {
             selectedExtraType = nil
         }
         .task(id: payloadStamp) { loadInspection() }
+        .task {
+            // Development affordance: HT_LIBRARY=<path> loads a tree at launch so
+            // the window can be exercised without going through the picker.
+            guard libraryPath == nil,
+                  let path = ProcessInfo.processInfo.environment["HT_LIBRARY"]
+            else { return }
+            let url = URL(fileURLWithPath: path)
+            libraryPath = url
+            scan(url)
+        }
         .frame(minWidth: 900, minHeight: 560)
     }
 
