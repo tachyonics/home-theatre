@@ -65,7 +65,7 @@ struct InspectorView: View {
                 ContentUnavailableView("Nothing selected", systemImage: "sidebar.right")
             }
         }
-        .inspectorColumnWidth(min: 300, ideal: 380, max: 560)
+        .inspectorColumnWidth(min: 320, ideal: 420, max: 640)
     }
 
     // MARK: - Header
@@ -80,8 +80,7 @@ struct InspectorView: View {
             Text(target.mediaPath.path)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .truncationMode(.head)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
         }
     }
@@ -93,6 +92,13 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Resolved").font(.subheadline).bold()
 
+            resolvedRows(target)
+        }
+    }
+
+    @ViewBuilder
+    private func resolvedRows(_ target: InspectorTarget) -> some View {
+        Group {
             switch target {
             case .series(let resolved):
                 pair("Display order", resolved.series.displayOrder?.rawValue ?? "aired (default)")
@@ -150,17 +156,22 @@ struct InspectorView: View {
         }
     }
 
+    /// Label at a bounded width, value taking the rest.
+    ///
+    /// `maxWidth: .infinity` is what makes the value wrap to the space actually
+    /// available; `fixedSize` would ask for its full unwrapped width instead and
+    /// push the text past the edge of the drawer.
     private func pair(_ label: String, _ value: String, tone: Color? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(width: 90, alignment: .leading)
+                .frame(width: 96, alignment: .topLeading)
             Text(value)
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(tone ?? .primary)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .textSelection(.enabled)
-            Spacer(minLength: 0)
         }
     }
 
@@ -220,25 +231,30 @@ private struct NFOFieldRow: View {
     let field: NFOField
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
+            // A bounded width, so a long tag name wraps within its column instead
+            // of widening the row.
             Text(String(repeating: "  ", count: field.depth) + field.name)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(nameColor)
-                .frame(width: 130, alignment: .leading)
+                .frame(width: 118, alignment: .topLeading)
 
-            Text(field.value)
-                .font(.system(.caption2, design: .monospaced))
-                .strikethrough(field.isIgnored)
-                .foregroundStyle(field.isIgnored ? .secondary : .primary)
-                .lineLimit(3)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(field.value)
+                    .font(.system(.caption2, design: .monospaced))
+                    .strikethrough(field.isIgnored)
+                    .foregroundStyle(field.isIgnored ? .secondary : .primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
 
-            Spacer(minLength: 0)
-
-            if let note {
-                Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                // Under the value rather than beside it: a third column would take
+                // width from the thing being explained.
+                if let note {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
         }
     }

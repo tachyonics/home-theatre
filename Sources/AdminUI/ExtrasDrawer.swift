@@ -1,3 +1,4 @@
+import AppKit
 import HomeTheatreCore
 import SwiftUI
 
@@ -119,5 +120,39 @@ struct ExtrasDrawer: View {
                     .truncationMode(.middle)
             }
         }
+    }
+}
+
+
+/// Replaces what VSplitView would have given us, without letting it renegotiate
+/// the widths of the browsing columns above.
+struct ExtrasResizeHandle: View {
+    @Binding var height: CGFloat
+    @State private var heightAtDragStart: CGFloat?
+
+    private static let range: ClosedRange<CGFloat> = 120...620
+
+    var body: some View {
+        ZStack {
+            Divider()
+            Rectangle()
+                .fill(.clear)
+                .frame(height: 8)
+                .contentShape(.rect)
+        }
+        .frame(height: 8)
+        .onHover { inside in
+            if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    let start = heightAtDragStart ?? height
+                    heightAtDragStart = start
+                    // Dragging up grows the drawer, so the translation is inverted.
+                    height = min(max(start - value.translation.height, Self.range.lowerBound), Self.range.upperBound)
+                }
+                .onEnded { _ in heightAtDragStart = nil }
+        )
     }
 }
