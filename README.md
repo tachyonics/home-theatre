@@ -35,11 +35,16 @@ swift test          # 28 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
-`AdminUI` is currently read-only: choose a folder and it prints how the tree
-resolves — episodes in display order, extras and their parents, and anything it
-could not place. Either a library root (one directory per series) or a single
-series folder works; the scanner detects which it was given and says so, and the
-Auto/Library/Series control overrides it when detection cannot tell.
+`AdminUI` is currently read-only: a three-column browser over Series → Seasons →
+Episodes. Episodes are listed in resolved display order, badged `inherited` or
+`pinned NxM`, with extras nested under whatever they belong to. Series-level
+extras and unplaced files sit in the seasons column, since they belong to no
+season.
+
+Either a library root (one directory per series) or a single series folder works;
+the scanner detects which it was given, and the Auto/Library/Series control
+overrides it when detection cannot tell. The toolbar's Report button opens the
+full text rendering, which is the copyable, diffable view of the same data.
 
 ## The rules this encodes
 
