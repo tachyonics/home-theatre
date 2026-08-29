@@ -20,7 +20,12 @@ struct ContentView: View {
 
     @State private var selectedSeries: URL?
     @State private var selectedSeason: Int?
+    @State private var selectedEpisode: URL?
     @State private var showingReport = false
+
+    @State private var inspectorPresented = true
+    @State private var inspection: NFOInspection?
+    @State private var inspectionError: String?
 
     /// Detection is right nearly always, so it stays the default. The override is
     /// here for the case it cannot call — a series folder with unconventional
@@ -49,12 +54,23 @@ struct ContentView: View {
             SeasonColumn(series: currentSeries, selection: $selectedSeason)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
-            EpisodeColumn(series: currentSeries, season: currentSeason)
+            EpisodeColumn(series: currentSeries, season: currentSeason, selection: $selectedEpisode)
+        }
+        .inspector(isPresented: $inspectorPresented) {
+            InspectorView(target: inspectorTarget, inspection: inspection, loadError: inspectionError)
         }
         .toolbar { toolbarContent }
         .overlay { emptyState }
         .sheet(isPresented: $showingReport) { reportSheet }
-        .onChange(of: selectedSeries) { selectedSeason = defaultSeason }
+        .onChange(of: selectedSeries) {
+            selectedSeason = defaultSeason
+            selectedEpisode = nil
+        }
+        // Stepping back out to a season should describe the season, not whichever
+        // episode happened to be selected underneath it.
+        .onChange(of: selectedSeason) { selectedEpisode = nil }
+        .onChange(of: inspectorTarget) { loadInspection() }
+        .task(id: payloadStamp) { loadInspection() }
         .frame(minWidth: 900, minHeight: 560)
     }
 
@@ -74,6 +90,25 @@ struct ContentView: View {
     private var defaultSeason: Int? {
         currentSeries?.seasons.first?.number
     }
+
+    private var currentEpisode: ResolvedEpisode? {
+        guard let selectedEpisode else { return nil }
+        return currentSeason?.episodes.first { $0.episode.file == selectedEpisode }
+    }
+
+    /// Most specific selection wins.
+    private var inspectorTarget: InspectorTarget? {
+        guard let currentSeries else { return nil }
+        if let currentEpisode { return .episode(currentEpisode) }
+        if let currentSeason {
+            let scanned = currentSeries.series.seasons.first { $0.number == currentSeason.number }
+            return .season(series: currentSeries, season: currentSeason, scanned: scanned)
+        }
+        return .series(currentSeries)
+    }
+
+    /// Changes whenever a scan replaces the data, so the drawer re-reads from disk.
+    private var payloadStamp: URL? { payload?.result.root }
 
     // MARK: - Chrome
 
@@ -116,6 +151,13 @@ struct ContentView: View {
             }
             .disabled(payload == nil)
             .help("The full text report — copyable, and diffable between scans.")
+
+            Button {
+                inspectorPresented.toggle()
+            } label: {
+                Label("Details", systemImage: "sidebar.right")
+            }
+            .help("Show the NFO behind the selected series, season or episode.")
         }
     }
 
@@ -187,6 +229,30 @@ struct ContentView: View {
         scan(url)
     }
 
+    /// Read on demand rather than retained from the scan: the file is small, and
+    /// re-reading means an NFO edited outside the app shows its current contents
+    /// as soon as it is reselected.
+    private func loadInspection() {
+        inspection = nil
+        inspectionError = nil
+        guard let url = inspectorTarget?.nfoURL else { return }
+
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<NFOInspection, any Error> in
+                do { return .success(try NFOInspection.load(contentsOf: url)) }
+                catch { return .failure(error) }
+            }.value
+
+            // The selection may have moved on while this was loading.
+            guard inspectorTarget?.nfoURL == url else { return }
+
+            switch outcome {
+            case .success(let value): inspection = value
+            case .failure(let error): inspectionError = "\(error)"
+            }
+        }
+    }
+
     private func scan(_ url: URL) {
         isScanning = true
         scanError = nil
@@ -217,6 +283,7 @@ struct ContentView: View {
                     selectedSeries = value.resolved.first?.series.folder
                 }
                 selectedSeason = defaultSeason
+                selectedEpisode = nil
             case .failure(let error):
                 payload = nil
                 scanError = "\(error)"

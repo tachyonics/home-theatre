@@ -31,7 +31,7 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 28 tests
+swift test          # 34 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
@@ -40,6 +40,14 @@ Episodes. Episodes are listed in resolved display order, badged `inherited` or
 `pinned NxM`, with extras nested under whatever they belong to. Series-level
 extras and unplaced files sit in the seasons column, since they belong to no
 season.
+
+A right-hand drawer describes whatever is selected — series, season or episode —
+showing the resolved state (identity vs display numbering, where it renders, lock
+state) alongside the NFO behind it: every tag in document order, colour-coded by
+role, with the file's raw source underneath. Tags Emby would silently ignore are
+struck through and labelled, so an `<airsbefore_season>` overwritten by a later
+`<displayseason>`, or a `<displayepisode>0</displayepisode>` rejected for being
+non-positive, are visible rather than mysterious.
 
 Either a library root (one directory per series) or a single series folder works;
 the scanner detects which it was given, and the Auto/Library/Series control
