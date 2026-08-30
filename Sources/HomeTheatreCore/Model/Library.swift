@@ -60,6 +60,8 @@ public struct Episode: Sendable, Hashable {
     public var locked: Bool
     public var providerIds: [String: String]
     public var extras: [Extra]
+    /// The thumb and external subtitles sitting beside the file.
+    public var assets: [MediaAsset]
 
     public init(
         file: URL,
@@ -72,7 +74,8 @@ public struct Episode: Sendable, Hashable {
         title: String? = nil,
         locked: Bool = false,
         providerIds: [String: String] = [:],
-        extras: [Extra] = []
+        extras: [Extra] = [],
+        assets: [MediaAsset] = []
     ) {
         self.file = file
         self.nfoURL = nfoURL
@@ -85,6 +88,7 @@ public struct Episode: Sendable, Hashable {
         self.locked = locked
         self.providerIds = providerIds
         self.extras = extras
+        self.assets = assets
     }
 
     public var displaySource: DisplaySource {
@@ -118,6 +122,9 @@ public struct Season: Sendable, Hashable {
     public var providerIds: [String: String]
     public var episodes: [Episode]
     public var extras: [Extra]
+    /// Images and theme media, whether they sit in this season's own folder or
+    /// were filed up in the series folder as `seasonXX-poster.jpg`.
+    public var assets: [MediaAsset]
 
     public init(
         number: Int,
@@ -128,7 +135,8 @@ public struct Season: Sendable, Hashable {
         locked: Bool = false,
         providerIds: [String: String] = [:],
         episodes: [Episode] = [],
-        extras: [Extra] = []
+        extras: [Extra] = [],
+        assets: [MediaAsset] = []
     ) {
         self.number = number
         self.folderNumber = folderNumber
@@ -139,6 +147,7 @@ public struct Season: Sendable, Hashable {
         self.providerIds = providerIds
         self.episodes = episodes
         self.extras = extras
+        self.assets = assets
     }
 
     public var isSpecials: Bool { number == 0 }
@@ -158,6 +167,8 @@ public struct Series: Sendable, Hashable {
     public var providerIds: [String: String]
     public var seasons: [Season]
     public var extras: [Extra]
+    /// Images and theme media in the series folder.
+    public var assets: [MediaAsset]
     /// Video files under the series that could not be placed — the editor's
     /// "unassigned bin", and the raw material for extras assignment.
     public var unassigned: [URL]
@@ -170,6 +181,7 @@ public struct Series: Sendable, Hashable {
         providerIds: [String: String] = [:],
         seasons: [Season] = [],
         extras: [Extra] = [],
+        assets: [MediaAsset] = [],
         unassigned: [URL] = []
     ) {
         self.name = name
@@ -179,6 +191,7 @@ public struct Series: Sendable, Hashable {
         self.providerIds = providerIds
         self.seasons = seasons
         self.extras = extras
+        self.assets = assets
         self.unassigned = unassigned
     }
 

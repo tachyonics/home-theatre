@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var extrasPresented = false
     @State private var extrasHeight: CGFloat = 240
     @State private var extrasFilter: ExtrasDrawer.ExtrasFilter = .all
+    @State private var capability: Capability = .details
     @State private var inspection: NFOInspection?
     @State private var inspectionError: String?
 
@@ -82,7 +83,12 @@ struct ContentView: View {
             }
         }
         .inspector(isPresented: $inspectorPresented) {
-            InspectorView(target: inspectorTarget, inspection: inspection, loadError: inspectionError)
+            InspectorView(
+                target: inspectorTarget,
+                inspection: inspection,
+                loadError: inspectionError,
+                capability: $capability
+            )
         }
         .toolbar { toolbarContent }
         .overlay { emptyState }
@@ -92,6 +98,12 @@ struct ContentView: View {
             // The folder list is fixed, but a filter narrowing to an empty folder
             // reads as a bug when the selection changes underneath it.
             extrasFilter = .all
+            // Capabilities differ by level, so a selection can stop existing when
+            // the target does. Keep it when it still applies — stepping through
+            // episodes comparing subtitles should not reset the pane every time.
+            if let level = inspectorTarget?.level, !capability.applies(to: level) {
+                capability = .details
+            }
         }
         .task(id: payloadStamp) { loadInspection() }
         .task {

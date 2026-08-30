@@ -40,12 +40,38 @@ enum InspectorTarget: Equatable {
         case .episode(let resolved): resolved.episode.file
         }
     }
+
+    var level: ItemLevel {
+        switch self {
+        case .series: .series
+        case .season: .season
+        case .episode: .episode
+        }
+    }
+
+    var assets: [MediaAsset] {
+        switch self {
+        case .series(let resolved): resolved.series.assets
+        case .season(_, _, let scanned): scanned?.assets ?? []
+        case .episode(let resolved): resolved.episode.assets
+        }
+    }
+
+    /// What this item supplies to a client. Extras are deliberately absent:
+    /// they are the bottom drawer's subject, at a wider scope — everything
+    /// beneath the item too — and duplicating them here would only disagree.
+    var capabilityEntries: [CapabilityInventory.Entry] {
+        CapabilityInventory.entries(level: level, nfoURL: nfoURL, assets: assets)
+    }
 }
 
 struct InspectorView: View {
     let target: InspectorTarget?
     let inspection: NFOInspection?
     let loadError: String?
+    /// Which capability the pane is describing. Owned by the content view so it
+    /// survives the drawer being closed and reopened.
+    @Binding var capability: Capability
 
     var body: some View {
         Group {
@@ -56,7 +82,7 @@ struct InspectorView: View {
                         Divider()
                         resolvedSection(target)
                         Divider()
-                        nfoSection(target)
+                        capabilitySection(target)
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,19 +201,59 @@ struct InspectorView: View {
         }
     }
 
+    // MARK: - Capabilities
+
+    /// A file is only interesting for what it lets the item do, and Emby spells the
+    /// same capability several different ways on disk. So the pane is driven by the
+    /// capability list — every one this level can have, present or not — and the
+    /// files are what sits underneath the one you pick.
+    @ViewBuilder
+    private func capabilitySection(_ target: InspectorTarget) -> some View {
+        let entries = target.capabilityEntries
+        // The selection outlives the target it was made against, and an episode
+        // has no Poster; fall back rather than showing an empty picker.
+        let resolved = entries.first { $0.capability == capability } ?? entries[0]
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Provides").font(.subheadline).bold()
+                Spacer()
+                Text("\(entries.count { $0.isPresent }) of \(entries.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+
+            Picker("Capability", selection: $capability) {
+                ForEach(entries) { entry in
+                    Text("\(entry.displayName) — \(entry.countLabel)").tag(entry.capability)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+
+            Text(resolved.capability.purpose)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            switch resolved.capability {
+            case .details: nfoBody(target)
+            default: AssetList(entry: resolved)
+            }
+        }
+    }
+
     // MARK: - NFO
 
     @ViewBuilder
-    private func nfoSection(_ target: InspectorTarget) -> some View {
+    private func nfoBody(_ target: InspectorTarget) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("NFO").font(.subheadline).bold()
-                Spacer()
-                if let url = target.nfoURL {
-                    Text(url.lastPathComponent)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
+            if let url = target.nfoURL {
+                Text(url.lastPathComponent)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if let loadError {
@@ -201,6 +267,7 @@ struct InspectorView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                AcceptedNames(capability: .details, level: target.level)
             } else if let inspection {
                 fieldList(inspection)
                 DisclosureGroup("Source") {
