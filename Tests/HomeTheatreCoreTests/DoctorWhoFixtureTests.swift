@@ -67,6 +67,21 @@ final class DoctorWhoFixtureTests: XCTestCase {
         try touch("\(series)/Specials/Doctor Who S00E01 The Christmas Invasion-behindthescenes.mkv")
         try touch("\(series)/Specials/interviews/David Tennant on Christmas.mkv")
 
+        // Artwork, theme media and subtitles — everything that is neither content
+        // nor NFO, including a poster that loses to `folder.jpg` and a theme video
+        // that must not be mistaken for a stray episode.
+        try touch("\(series)/folder.jpg")
+        try touch("\(series)/poster.jpg")
+        try touch("\(series)/fanart.jpg")
+        try touch("\(series)/theme.mp3")
+        try touch("\(series)/backdrops/Title Sequence.mkv")
+        try touch("\(series)/season01-poster.jpg")
+        try touch("\(series)/season-specials-poster.jpg")
+        try touch("\(series)/Season 1/folder.jpg")
+        try touch("\(series)/Season 1/Doctor Who S01E01-thumb.jpg")
+        try touch("\(series)/Season 1/Doctor Who S01E01.eng.srt")
+        try touch("\(series)/Season 1/Doctor Who S01E01.fre.forced.srt")
+
         // An unplaced file, the raw material for the editor's unassigned bin.
         try touch("\(series)/Some Unlabelled Documentary.mkv")
     }
@@ -144,6 +159,61 @@ final class DoctorWhoFixtureTests: XCTestCase {
         XCTAssertFalse(third.isRelocated)
     }
 
+    func testAssetsAreCollectedAsCapabilities() throws {
+        let result = try LibraryScanner().scan(root: root)
+        let series = try XCTUnwrap(result.series.first)
+
+        // A theme video lives in a sub-folder of videos, which would otherwise
+        // read as unplaced content.
+        XCTAssertEqual(series.unassigned.map(\.lastPathComponent), ["Some Unlabelled Documentary.mkv"])
+
+        let seriesEntries = CapabilityInventory.entries(
+            level: .series,
+            nfoURL: series.nfoURL,
+            assets: series.assets
+        )
+        func entry(_ capability: Capability, _ entries: [CapabilityInventory.Entry]) throws -> CapabilityInventory.Entry {
+            try XCTUnwrap(entries.first { $0.capability == capability })
+        }
+
+        XCTAssertTrue(try entry(.details, seriesEntries).isPresent)
+        XCTAssertEqual(try entry(.poster, seriesEntries).count, 2)
+        XCTAssertEqual(try entry(.poster, seriesEntries).shadowedCount, 1, "poster.jpg loses to folder.jpg")
+        XCTAssertEqual(try entry(.backdrop, seriesEntries).count, 1)
+        XCTAssertEqual(try entry(.themeSong, seriesEntries).countLabel, "1 file")
+        XCTAssertEqual(try entry(.themeVideo, seriesEntries).assets.map(\.name), ["Title Sequence.mkv"])
+        XCTAssertFalse(try entry(.banner, seriesEntries).isPresent)
+
+        // The season's own folder.jpg wins; the series-folder season01-poster.jpg
+        // is kept so the duplication is visible, but marked as unreachable.
+        let seasonOne = try XCTUnwrap(series.seasons.first { $0.number == 1 })
+        let posters = seasonOne.assets.filter { $0.capability == .poster }
+        XCTAssertEqual(posters.map(\.name), ["folder.jpg", "season01-poster.jpg"])
+        XCTAssertEqual(posters.map(\.isShadowed), [false, true])
+        XCTAssertEqual(posters.last?.locationNote, "in the series folder")
+
+        // A season image can name a season that has a folder of its own or not.
+        let specials = try XCTUnwrap(series.seasons.first { $0.number == 0 })
+        XCTAssertEqual(specials.assets.map(\.rule), ["season-specials-poster.ext"])
+
+        let first = try XCTUnwrap(seasonOne.episodes.first { $0.number == 1 })
+        let episodeEntries = CapabilityInventory.entries(
+            level: .episode,
+            nfoURL: first.nfoURL,
+            assets: first.assets
+        )
+        XCTAssertEqual(try entry(.thumb, episodeEntries).count, 1)
+        XCTAssertEqual(try entry(.subtitles, episodeEntries).count, 2)
+        XCTAssertEqual(
+            try entry(.subtitles, episodeEntries).assets.compactMap(\.subtitle?.summary),
+            ["eng · srt", "fre · forced · srt"]
+        )
+        XCTAssertFalse(try entry(.details, episodeEntries).isPresent, "this episode has no sidecar")
+
+        // The suffix extra beside it must not be read as one of its subtitles.
+        XCTAssertTrue(first.assets.allSatisfy { !$0.name.contains("behindthescenes") })
+    }
+
     func testReportRenders() throws {
         let result = try LibraryScanner().scan(root: root)
         let text = LibraryReport().render(result)
@@ -158,6 +228,8 @@ final class DoctorWhoFixtureTests: XCTestCase {
             "extras on a dissolved season must still be reported"
         )
         XCTAssertTrue(text.contains("David Tennant on Christmas"))
+        XCTAssertTrue(text.contains("provides: Poster ×2, Backdrop, Theme Song, Theme Video"))
+        XCTAssertTrue(text.contains("thumb, subtitles ×2"), "an episode's own files belong on its line")
         if ProcessInfo.processInfo.environment["HT_PRINT_REPORT"] != nil { print(text) }
     }
 }

@@ -60,6 +60,13 @@ public struct LibraryScanner: Sendable {
     func scanSeries(folder: URL, warnings: inout [String]) throws -> Series {
         var series = Series(name: folder.lastPathComponent, folder: folder)
 
+        // Read once: the episode-level asset lookups below all consult the same
+        // directory, and re-reading it per episode is the easy way to make a scan
+        // quadratic in the size of a season.
+        let listing = FolderListing.read(folder)
+        let folderAssets = AssetScanner.folderAssets(level: .series, listing: listing)
+        series.assets = folderAssets.own
+
         let nfoURL = folder.appendingPathComponent("tvshow.nfo")
         if FileManager.default.fileExists(atPath: nfoURL.path) {
             series.nfoURL = nfoURL
@@ -74,6 +81,11 @@ public struct LibraryScanner: Sendable {
 
         for child in try subdirectories(of: folder) {
             let name = child.lastPathComponent
+
+            // Already accounted for by the asset scan above. Skipping them here is
+            // what keeps `backdrops/loop.mkv` — a theme video — out of the
+            // unassigned bin at the bottom of this loop.
+            if AssetScanner.assetFolderNames.contains(name.lowercased()) { continue }
 
             // `Specials` is both a season-0 folder name and an extras folder name.
             // Emby tells them apart by what is inside: SxxExx-named files make it a
@@ -110,7 +122,7 @@ public struct LibraryScanner: Sendable {
             if let suffix = FilenameParser.suffixExtra(fromFilename: file.lastPathComponent) {
                 looseSuffixExtras.append((suffix, file))
             } else if let numbering = FilenameParser.episodeNumbering(from: file.lastPathComponent) {
-                looseEpisodes.append(makeEpisode(file: file, numbering: numbering))
+                looseEpisodes.append(makeEpisode(file: file, numbering: numbering, listing: listing))
             } else {
                 series.unassigned.append(file)
             }
@@ -144,14 +156,43 @@ public struct LibraryScanner: Sendable {
             insert(loose, into: &seasons, series: series.name, warnings: &warnings)
         }
 
+        // `season01-poster.jpg` was found in this folder but names a season, so it
+        // is handed down now that the seasons are known.
+        for scoped in folderAssets.seasonScoped {
+            guard var season = seasons[scoped.season] else {
+                warnings.append(
+                    "\(scoped.asset.name) in \(series.name) names season \(scoped.season), which has no episodes here"
+                )
+                continue
+            }
+            attach(scoped.asset, to: &season)
+            seasons[scoped.season] = season
+        }
+
         series.seasons = seasons.values.sorted { $0.number < $1.number }
         return series
+    }
+
+    /// A season image kept in the series folder loses to one in the season's own
+    /// folder — the season folder is the more specific place, and is checked
+    /// first. Both being present is worth showing rather than resolving silently,
+    /// so the loser is kept and marked instead of dropped.
+    private func attach(_ asset: MediaAsset, to season: inout Season) {
+        var asset = asset
+        if !asset.capability.isMultiValued,
+           season.assets.contains(where: { $0.capability == asset.capability && !$0.isShadowed }) {
+            asset.isShadowed = true
+        }
+        season.assets.append(asset)
     }
 
     // MARK: - Season
 
     func scanSeason(folder: URL, folderNumber: Int, warnings: inout [String]) throws -> Season {
         var season = Season(number: folderNumber, folderNumber: folderNumber, folder: folder)
+
+        let listing = FolderListing.read(folder)
+        season.assets = AssetScanner.folderAssets(level: .season, listing: listing).own
 
         let nfoURL = folder.appendingPathComponent("season.nfo")
         if FileManager.default.fileExists(atPath: nfoURL.path) {
@@ -184,7 +225,7 @@ public struct LibraryScanner: Sendable {
                 warnings.append("\(file.lastPathComponent) in \(folder.lastPathComponent) has no episode numbering")
                 continue
             }
-            episodes.append(makeEpisode(file: file, numbering: numbering))
+            episodes.append(makeEpisode(file: file, numbering: numbering, listing: listing))
         }
 
         // Sub-folders: extras for the season, or an SxxExx folder holding one episode.
@@ -192,13 +233,14 @@ public struct LibraryScanner: Sendable {
             let name = child.lastPathComponent
 
             if let numbering = FilenameParser.episodeFolderNumbering(fromFolderName: name) {
+                let innerListing = FolderListing.read(child)
                 for file in try videoFiles(in: child, recursive: false) {
                     if let suffix = FilenameParser.suffixExtra(fromFilename: file.lastPathComponent) {
                         suffixExtras.append((suffix, file))
                     } else if let inner = FilenameParser.episodeNumbering(from: file.lastPathComponent) {
-                        episodes.append(makeEpisode(file: file, numbering: inner))
+                        episodes.append(makeEpisode(file: file, numbering: inner, listing: innerListing))
                     } else {
-                        episodes.append(makeEpisode(file: file, numbering: numbering))
+                        episodes.append(makeEpisode(file: file, numbering: numbering, listing: innerListing))
                     }
                 }
                 for grandchild in try subdirectories(of: child) {
@@ -278,13 +320,18 @@ public struct LibraryScanner: Sendable {
         seasons[season.number] = existing
     }
 
-    private func makeEpisode(file: URL, numbering: FilenameParser.EpisodeNumbering) -> Episode {
+    private func makeEpisode(
+        file: URL,
+        numbering: FilenameParser.EpisodeNumbering,
+        listing: FolderListing
+    ) -> Episode {
         var episode = Episode(
             file: file,
             season: numbering.season,
             number: numbering.number,
             numberEnd: numbering.numberEnd,
-            title: file.deletingPathExtension().lastPathComponent
+            title: file.deletingPathExtension().lastPathComponent,
+            assets: AssetScanner.fileAssets(for: file, listing: listing)
         )
 
         let nfoURL = file.deletingPathExtension().appendingPathExtension("nfo")

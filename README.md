@@ -21,8 +21,10 @@ NFO.
   - `Model` — series / season / episode / extra, with **identity numbering kept
     separate from display numbering**
   - `NFO` — lossless XML tree plus typed reads of the structural tags
-  - `Scan` — filename and folder parsing, and the library scanner
-  - `Resolve` — derives the sequence a client actually renders
+  - `Scan` — filename and folder parsing, the library scanner, and the sidecar
+    asset scanner that maps files to the capabilities they provide
+  - `Resolve` — derives the sequence a client actually renders, and the
+    capability inventory behind the details pane
   - `Report` — plain-text rendering of a resolved library
 - `Sources/AdminUI` — a deliberately minimal macOS harness for exercising the core
 - `Tests/HomeTheatreCoreTests` — includes a Doctor Who fixture covering specials
@@ -31,7 +33,7 @@ NFO.
 ## Running
 
 ```sh
-swift test          # 44 tests
+swift test          # 59 tests
 swift run AdminUI   # pick a TV library folder, read the resolved structure
 ```
 
@@ -43,11 +45,34 @@ season.
 
 A right-hand drawer describes whatever is selected — series, season or episode —
 showing the resolved state (identity vs display numbering, where it renders, lock
-state) alongside the NFO behind it: every tag in document order, colour-coded by
-role, with the file's raw source underneath. Tags Emby would silently ignore are
-struck through and labelled, so an `<airsbefore_season>` overwritten by a later
-`<displayseason>`, or a `<displayepisode>0</displayepisode>` rejected for being
-non-positive, are visible rather than mysterious.
+state) above a **Provides** section: a drop-down over every capability that item
+*could* supply, present or not, counted as "6 of 11".
+
+Capability, not file, is the unit. A poster is one entry whether it is
+`folder.jpg`, `poster.jpg` or a `season01-poster.jpg` sitting up in the series
+folder, and the NFO is simply the "Series/Season/Episode Details" capability
+rather than a special case. Picking one explains what it buys you and lists the
+files behind it — thumbnail, pixel size, byte count, and which naming rule
+claimed it.
+
+Two things the file system will not tell you are made explicit. **Shadowed
+files**: Emby checks the documented filenames in order and stops at the first, so
+a `poster.jpg` sitting behind a `folder.jpg` is on disk and never read — it is
+greyed out and labelled *Ignored — folder.jpg is checked first*, the same
+treatment the NFO view gives a superseded tag. **Missing capabilities** stay in
+the list rather than vanishing, showing the filenames that would satisfy them, so
+absence is actionable instead of invisible — the same reasoning as the extras
+drawer's fixed folder list.
+
+Extras are deliberately *not* one of the capabilities. They are the bottom
+drawer's subject and are scoped differently there — the selected item and
+everything beneath it — so listing them here as well would only disagree with it.
+
+The Details capability renders the NFO behind the item: every tag in document
+order, colour-coded by role, with the file's raw source underneath. Tags Emby
+would silently ignore are struck through and labelled, so an `<airsbefore_season>`
+overwritten by a later `<displayseason>`, or a `<displayepisode>0</displayepisode>`
+rejected for being non-positive, are visible rather than mysterious.
 
 A bottom drawer lists the extras for the same selection. The left pane is a
 fixed list of the nine extras folders Emby recognises — shown whether or not they
@@ -85,6 +110,32 @@ documentation does not cover them:
   sets the season's index — so a folder named `Season 1` holding
   `<seasonnumber>2</seasonnumber>` is season 2.
 - **Extras carry no NFO**, so the filename is the on-screen title.
+
+From Emby's naming documentation, which does cover these:
+
+- **Images are named by role, and most roles accept several names in a fixed
+  order.** Primary is `folder`, `poster`, `cover`, `default`, then `show` — the
+  last valid only in a series folder. Backdrop, uniquely, is *multi-valued*:
+  `backdrop`/`backdropX`, `fanart`/`fanart-X`, `background-X`, `art-X` and an
+  `extrafanart/` sub-folder all accumulate rather than compete. Banner, Thumb,
+  Logo, Disc and Clear Art each take their own aliases. Extensions are `jpg`,
+  `jpeg`, `png`, `tbn`.
+- **A series folder can hold season artwork.** `seasonXX-poster`,
+  `seasonXX-fanart`, `seasonXX-banner`, `seasonXX-landscape` and the
+  `season-specials-` forms belong to a season while living a level up — so they
+  are attached to that season, and marked shadowed when the season folder has its
+  own copy, which wins.
+- **Episode images** are `{name}-thumb.ext` beside the video, or `{name}.ext`
+  inside a `metadata/` sub-folder.
+- **External subtitles** are `{name}[.lang][.default|.forced|.foreign|.sdh].ext`
+  in `ass`, `srt`, `ssa`, `sub`/`idx` or `vtt`. `.foreign` is a synonym for
+  `.forced`; a `.sub` and its `.idx` are one track, not two. The prefix must be
+  the full stem, so `Show S01E03-behindthescenes.srt` belongs to the extra, not
+  to the episode.
+- **Theme media** is `theme.ext` or a `theme-music/` folder for songs, and a
+  `backdrops/` folder for videos. Those folders — with `extrafanart/` and
+  `metadata/` — are asset stores, not content, so their contents are never
+  reported as unplaced files.
 
 ## Next
 

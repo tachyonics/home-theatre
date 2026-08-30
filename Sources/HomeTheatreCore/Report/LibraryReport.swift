@@ -55,6 +55,10 @@ public struct LibraryReport: Sendable {
         if series.nfoURL == nil { attributes.append("no tvshow.nfo") }
         out += "  " + attributes.joined(separator: "   ") + "\n"
 
+        // What the folder gives Emby beyond the video files themselves. The NFO
+        // and the extras have lines of their own, so this covers the rest.
+        out += "  provides: \(provides(level: .series, assets: series.assets))\n"
+
         if includeExtras && !series.extras.isEmpty {
             out += "\n  Series extras\n"
             out += renderExtras(series.extras, indent: "    ")
@@ -78,6 +82,7 @@ public struct LibraryReport: Sendable {
                 if scanned.numberOverriddenByNFO, let folderNumber = scanned.folderNumber {
                     notes.append("folder says \(folderNumber), season.nfo says \(scanned.number)")
                 }
+                notes.append("provides: \(provides(level: .season, assets: scanned.assets))")
                 out += "     " + notes.joined(separator: "   ") + "\n"
             }
 
@@ -111,6 +116,14 @@ public struct LibraryReport: Sendable {
         return out
     }
 
+    /// The present capabilities, named. Missing ones are left out here — the
+    /// details pane is where absence is the point; a text report listing every
+    /// image nobody supplied would bury the rest.
+    private func provides(level: ItemLevel, assets: [MediaAsset]) -> String {
+        let summary = CapabilityInventory.summary(CapabilityInventory.entries(level: level, assets: assets))
+        return summary.isEmpty ? "nothing beyond the video files" : summary
+    }
+
     private func renderExtras(_ extras: [Extra], indent: String) -> String {
         extras
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
@@ -137,6 +150,10 @@ public struct LibraryReport: Sendable {
         if resolved.isRelocated { flags.append("moved from S\(episode.season ?? 0)") }
         if episode.locked { flags.append("locked") }
         if episode.nfoURL == nil { flags.append("no nfo") }
+        let assetSummary = CapabilityInventory.summary(
+            CapabilityInventory.entries(level: .episode, assets: episode.assets)
+        )
+        if !assetSummary.isEmpty { flags.append(assetSummary.lowercased()) }
 
         var out = "  \(position) \(identity) \(title) [\(flags.joined(separator: ", "))]\n"
         out += renderExtras(episode.extras, indent: "        ")
