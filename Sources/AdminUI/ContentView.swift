@@ -28,9 +28,18 @@ struct ContentView: View {
     /// This cannot be inferred from the selections: choosing a series immediately
     /// auto-selects its first season so the episode pane is not empty, which would
     /// make a "most specific selection wins" rule never resolve to the series.
-    @State private var focus: Focus = .series
+    ///
+    /// Nor can the selection bindings alone maintain it. `List(selection:)` writes
+    /// through its binding only when the value *changes*, so clicking the row that
+    /// is already selected — the series you are already inside, to look at the
+    /// series — reaches no setter. Such a click does move first responder into that
+    /// column, which is what `focusedColumn` is watching for.
+    @State private var focus: ColumnFocus = .series
 
-    enum Focus { case series, season, episode }
+    /// Mirrored into ``focus``, never read directly: it goes nil whenever the
+    /// lists give up focus altogether (clicking the toolbar, say), and the
+    /// inspector should keep describing whatever it was describing.
+    @FocusState private var focusedColumn: ColumnFocus?
 
     @State private var inspectorPresented = true
     @State private var extrasPresented = false
@@ -65,13 +74,26 @@ struct ContentView: View {
         // series column collapsed and clipped its rows.
         VStack(spacing: 0) {
             NavigationSplitView {
-                SeriesColumn(series: payload?.resolved ?? [], selection: seriesSelection)
-                    .navigationSplitViewColumnWidth(min: 240, ideal: 300)
+                SeriesColumn(
+                    series: payload?.resolved ?? [],
+                    selection: seriesSelection,
+                    focusedColumn: $focusedColumn
+                )
+                .navigationSplitViewColumnWidth(min: 240, ideal: 300)
             } content: {
-                SeasonColumn(series: currentSeries, selection: seasonSelection)
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+                SeasonColumn(
+                    series: currentSeries,
+                    selection: seasonSelection,
+                    focusedColumn: $focusedColumn
+                )
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260)
             } detail: {
-                EpisodeColumn(series: currentSeries, season: currentSeason, selection: episodeSelection)
+                EpisodeColumn(
+                    series: currentSeries,
+                    season: currentSeason,
+                    selection: episodeSelection,
+                    focusedColumn: $focusedColumn
+                )
             }
             .navigationSplitViewStyle(.balanced)
             .frame(maxHeight: .infinity)
@@ -104,6 +126,9 @@ struct ContentView: View {
             if let level = inspectorTarget?.level, !capability.applies(to: level) {
                 capability = .details
             }
+        }
+        .onChange(of: focusedColumn) { _, moved in
+            if let moved { focus = moved }
         }
         .task(id: payloadStamp) { loadInspection() }
         .task {

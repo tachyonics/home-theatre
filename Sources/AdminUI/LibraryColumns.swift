@@ -1,11 +1,21 @@
 import HomeTheatreCore
 import SwiftUI
 
+/// Which browsing column the user is working in.
+///
+/// Tracked as focus rather than derived from the selections, because a click can
+/// change the column being worked in without changing any selection — see
+/// ``ContentView/focus``.
+enum ColumnFocus: Hashable {
+    case series, season, episode
+}
+
 // MARK: - Series
 
 struct SeriesColumn: View {
     let series: [ResolvedSeries]
     @Binding var selection: URL?
+    @FocusState.Binding var focusedColumn: ColumnFocus?
 
     var body: some View {
         List(selection: $selection) {
@@ -13,6 +23,7 @@ struct SeriesColumn: View {
                 SeriesRow(resolved: resolved).tag(resolved.series.folder)
             }
         }
+        .focused($focusedColumn, equals: .series)
         .navigationTitle("Series")
     }
 }
@@ -52,6 +63,7 @@ private struct SeriesRow: View {
 struct SeasonColumn: View {
     let series: ResolvedSeries?
     @Binding var selection: Int?
+    @FocusState.Binding var focusedColumn: ColumnFocus?
 
     var body: some View {
         Group {
@@ -83,6 +95,7 @@ struct SeasonColumn: View {
                         }
                     }
                 }
+                .focused($focusedColumn, equals: .season)
             } else {
                 ContentUnavailableView("No series selected", systemImage: "sidebar.left")
             }
@@ -134,6 +147,7 @@ struct EpisodeColumn: View {
     let series: ResolvedSeries?
     let season: ResolvedSeason?
     @Binding var selection: URL?
+    @FocusState.Binding var focusedColumn: ColumnFocus?
 
     var body: some View {
         Group {
@@ -152,6 +166,7 @@ struct EpisodeColumn: View {
                     }
                 }
                 .listStyle(.inset)
+                .focused($focusedColumn, equals: .episode)
             } else {
                 ContentUnavailableView("No season selected", systemImage: "list.bullet.indent")
             }
