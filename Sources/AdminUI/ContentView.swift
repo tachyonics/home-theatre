@@ -49,6 +49,13 @@ struct ContentView: View {
     @State private var inspection: NFOInspection?
     @State private var inspectionError: String?
 
+    @Environment(ChangeStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
+
+    /// A rescan the user asked for that is waiting on them to accept losing the
+    /// queue. Entity ids are issued per scan, so pending changes cannot survive one.
+    @State private var rescanAwaitingConfirmation: URL?
+
     /// Detection is right nearly always, so it stays the default. The override is
     /// here for the case it cannot call — a series folder with unconventional
     /// season names reads as a library, and nothing in the tree says otherwise.
@@ -100,8 +107,12 @@ struct ContentView: View {
 
             if extrasPresented {
                 ExtrasResizeHandle(height: $extrasHeight)
-                ExtrasDrawer(target: inspectorTarget, selection: $extrasFilter)
-                    .frame(height: extrasHeight)
+                ExtrasDrawer(
+                    target: inspectorTarget,
+                    selection: $extrasFilter,
+                    fileAsExtra: fileAsExtra
+                )
+                .frame(height: extrasHeight)
             }
         }
         .inspector(isPresented: $inspectorPresented) {
@@ -115,6 +126,24 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .overlay { emptyState }
         .sheet(isPresented: $showingReport) { reportSheet }
+        .confirmationDialog(
+            "Discard \(store.count) pending change\(store.count == 1 ? "" : "s")?",
+            isPresented: Binding(
+                get: { rescanAwaitingConfirmation != nil },
+                set: { if !$0 { rescanAwaitingConfirmation = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Discard and Rescan", role: .destructive) {
+                guard let url = rescanAwaitingConfirmation else { return }
+                rescanAwaitingConfirmation = nil
+                store.removeAll()
+                scan(url)
+            }
+            Button("Cancel", role: .cancel) { rescanAwaitingConfirmation = nil }
+        } message: {
+            Text("A rescan reissues every entity id, so queued changes could no longer be matched to what they were made against.")
+        }
         .onChange(of: inspectorTarget) {
             loadInspection()
             // The folder list is fixed, but a filter narrowing to an empty folder
@@ -239,7 +268,7 @@ struct ContentView: View {
             .help("Auto detects whether the folder is a library root or one series. Override if it guesses wrong.")
 
             Button {
-                if let libraryPath { scan(libraryPath) }
+                if let libraryPath { requestScan(libraryPath) }
             } label: {
                 Label("Rescan", systemImage: "arrow.clockwise")
             }
@@ -250,6 +279,14 @@ struct ContentView: View {
             if isScanning {
                 ProgressView().controlSize(.small)
             }
+
+            Button {
+                openWindow(id: PendingChangesWindow.id)
+            } label: {
+                Label("Pending Changes", systemImage: "tray.full")
+            }
+            .badge(store.count)
+            .help("Review, apply or discard the changes queued so far.")
 
             Button {
                 showingReport = true
@@ -340,7 +377,7 @@ struct ContentView: View {
         libraryPath = url
         // A new folder gets a fresh detection rather than inheriting the last override.
         modeSelection = .auto
-        scan(url)
+        requestScan(url)
     }
 
     /// Read on demand rather than retained from the scan: the file is small, and
@@ -365,6 +402,36 @@ struct ContentView: View {
             case .failure(let error): inspectionError = "\(error)"
             }
         }
+    }
+
+    /// Every route to a scan comes through here, so the queue cannot be lost by
+    /// whichever button the user happened to press.
+    private func requestScan(_ url: URL) {
+        if store.isEmpty {
+            scan(url)
+        } else {
+            rescanAwaitingConfirmation = url
+        }
+    }
+
+    // MARK: - Editing
+
+    /// Queues the one action that turns an episode into an extra of its own season.
+    ///
+    /// The season comes from the episode, not from whatever the drawer is scoped
+    /// to: an extras folder sits under the item's own folder, and an episode has no
+    /// folder of its own, so its season is the only correct destination.
+    private func fileAsExtra(episodeID: UUID, folder: ExtrasFolder) -> Bool {
+        guard let location = payload?.result.locate(episode: episodeID) else { return false }
+
+        guard let action = ExtrasFiling.action(
+            episode: location.episode,
+            in: location.season,
+            folder: folder
+        ) else { return false }
+
+        store.add(action, to: location.entityRef)
+        return true
     }
 
     private func scan(_ url: URL) {

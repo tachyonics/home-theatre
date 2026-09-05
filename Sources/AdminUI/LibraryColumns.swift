@@ -155,7 +155,11 @@ struct EpisodeColumn: View {
                 List(selection: $selection) {
                     Section("Display order") {
                         ForEach(season.episodes, id: \.episode.file) { resolved in
-                            EpisodeRow(resolved: resolved).tag(resolved.episode.file)
+                            EpisodeRow(resolved: resolved)
+                                .tag(resolved.episode.file)
+                                // The entity id, not the path: where the file sits
+                                // is exactly what a drop is about to change.
+                                .draggable(resolved.episode.id.uuidString)
                         }
                     }
 
@@ -269,7 +273,7 @@ private struct ExtraRow: View {
     }
 }
 
-private struct Badge: View {
+struct Badge: View {
     enum Tone { case neutral, info, warning }
 
     let text: String

@@ -43,6 +43,15 @@ public struct Extra: Sendable, Hashable {
 }
 
 public struct Episode: Sendable, Hashable {
+    /// Assigned fresh by each scan, so a pending change can name this entity
+    /// independently of where its files currently sit — location being the one
+    /// attribute an edit is most likely to change.
+    ///
+    /// Declared with a default rather than as an initialiser parameter: callers
+    /// never supply it, and a struct copy carries it, so it survives the in-place
+    /// mutation the scanner does while filling an entity in.
+    public let id = UUID()
+
     public var file: URL
     public var nfoURL: URL?
 
@@ -109,6 +118,15 @@ public struct Episode: Sendable, Hashable {
 }
 
 public struct Season: Sendable, Hashable {
+    /// Assigned fresh by each scan, so a pending change can name this entity
+    /// independently of where its files currently sit — location being the one
+    /// attribute an edit is most likely to change.
+    ///
+    /// Declared with a default rather than as an initialiser parameter: callers
+    /// never supply it, and a struct copy carries it, so it survives the in-place
+    /// mutation the scanner does while filling an entity in.
+    public let id = UUID()
+
     /// The effective season number. `season.nfo`'s `<seasonnumber>` wins over the
     /// folder name when the two disagree — Emby reads it into the season's index.
     public var number: Int
@@ -160,6 +178,15 @@ public struct Season: Sendable, Hashable {
 }
 
 public struct Series: Sendable, Hashable {
+    /// Assigned fresh by each scan, so a pending change can name this entity
+    /// independently of where its files currently sit — location being the one
+    /// attribute an edit is most likely to change.
+    ///
+    /// Declared with a default rather than as an initialiser parameter: callers
+    /// never supply it, and a struct copy carries it, so it survives the in-place
+    /// mutation the scanner does while filling an entity in.
+    public let id = UUID()
+
     public var name: String
     public var folder: URL
     public var nfoURL: URL?
