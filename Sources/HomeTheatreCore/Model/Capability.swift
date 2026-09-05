@@ -4,7 +4,7 @@ import Foundation
 ///
 /// The capability list differs by level — an episode can carry subtitles and a
 /// series cannot — and ``Capability/details`` needs the level to name itself.
-public enum ItemLevel: String, Sendable, Hashable, CaseIterable {
+public enum ItemLevel: String, Sendable, Hashable, Codable, CaseIterable {
     case series
     case season
     case episode

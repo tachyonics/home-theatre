@@ -7,6 +7,13 @@ import SwiftUI
 struct ExtrasDrawer: View {
     let target: InspectorTarget?
     @Binding var selection: ExtrasFilter
+    /// Queues the moves that file a dragged episode into a folder, returning false
+    /// when the id names nothing — the drawer knows the destination, but only the
+    /// content view holds the scan the id has to be resolved against.
+    let fileAsExtra: (UUID, ExtrasFolder) -> Bool
+
+    /// Highlighted while a drag is over it, so an empty row still reads as a target.
+    @State private var dropTarget: String?
 
     /// The left pane is a fixed list of destinations, not a summary of what is
     /// present — every recognised folder stays visible so an extra can be filed
@@ -70,6 +77,20 @@ struct ExtrasDrawer: View {
                     )
                     .tag(ExtrasFilter.folder(entry.folder.name))
                     .help("Files in a “\(entry.folder.name)” folder become \(entry.folder.type.displayName) extras.")
+                    .listRowBackground(
+                        dropTarget == entry.folder.name
+                            ? Color.accentColor.opacity(0.25)
+                            : Color.clear
+                    )
+                    .dropDestination(for: String.self) { items, _ in
+                        // The payload is an entity id. Anything else dragged in
+                        // from outside simply resolves to nothing and is refused,
+                        // which is why no custom UTType is needed.
+                        items.compactMap(UUID.init(uuidString:))
+                            .reduce(false) { fileAsExtra($1, entry.folder) || $0 }
+                    } isTargeted: { over in
+                        dropTarget = over ? entry.folder.name : nil
+                    }
                 }
 
                 // Suffix-bound extras belong to no folder, so they need a home in
