@@ -50,7 +50,11 @@ public enum ExtrasFiling {
             // since `extras` and `specials` are both "Extra".
             title: "Set as \(folder.type.displayName) extra",
             detail: "into \(season.folder.lastPathComponent)/\(folder.name)/",
-            steps: steps
+            steps: steps,
+            // The steps alone would leave the browser to infer the decision back
+            // out of four file moves; naming it here is what lets the queued
+            // change be shown where the episode already is.
+            intent: .fileEpisodeAsExtra(folder)
         )
     }
 }

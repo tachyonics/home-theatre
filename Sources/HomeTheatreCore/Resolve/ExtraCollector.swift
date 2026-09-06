@@ -118,7 +118,10 @@ public enum ExtraCollector {
             }
     }
 
-    static func seasonLabel(_ number: Int) -> String {
+    /// `Season 1` / `Specials` — the owner label a season-level extra carries.
+    /// Public because a projected extra has to be labelled the same way a scanned
+    /// one is, or the two would not sit together in one list.
+    public static func seasonLabel(_ number: Int) -> String {
         number == 0 ? "Specials" : "Season \(number)"
     }
 }

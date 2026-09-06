@@ -3,7 +3,7 @@ import Foundation
 /// Mirrors Emby/Jellyfin's `ExtraType` enum. Extras carry one of these; it is
 /// derived at scan time from the containing folder name or a filename suffix,
 /// never from metadata — there is no field for it in Emby's metadata editor.
-public enum ExtraType: String, Sendable, Hashable, CaseIterable {
+public enum ExtraType: String, Sendable, Hashable, Codable, CaseIterable {
     case unknown
     case clip
     case trailer
@@ -76,7 +76,7 @@ public enum ExtraParent: Sendable, Hashable {
 ///
 /// Folders sit directly under the item's own folder — nested folders are not
 /// supported — and the order here is the order Emby documents them in.
-public struct ExtrasFolder: Sendable, Hashable, Identifiable {
+public struct ExtrasFolder: Sendable, Hashable, Codable, Identifiable {
     public var name: String
     public var type: ExtraType
 

@@ -146,6 +146,11 @@ private struct SeasonRow: View {
 struct EpisodeColumn: View {
     let series: ResolvedSeries?
     let season: ResolvedSeason?
+    /// Queued filings by the file each will produce. An episode with one queued has
+    /// already left this list — it is drawn under Season extras instead, which is
+    /// where applying will actually put it — so this is only ever read to badge the
+    /// extra it became.
+    let pending: [URL: PendingFiling]
     @Binding var selection: URL?
     @FocusState.Binding var focusedColumn: ColumnFocus?
 
@@ -155,7 +160,7 @@ struct EpisodeColumn: View {
                 List(selection: $selection) {
                     Section("Display order") {
                         ForEach(season.episodes, id: \.episode.file) { resolved in
-                            EpisodeRow(resolved: resolved)
+                            EpisodeRow(resolved: resolved, pending: pending)
                                 .tag(resolved.episode.file)
                                 // The entity id, not the path: where the file sits
                                 // is exactly what a drop is about to change.
@@ -165,7 +170,9 @@ struct EpisodeColumn: View {
 
                     if let extras = seasonExtras, !extras.isEmpty {
                         Section("Season extras") {
-                            ForEach(extras, id: \.file) { ExtraRow(extra: $0) }
+                            ForEach(extras, id: \.file) { extra in
+                                ExtraRow(extra: extra, filing: pending[extra.file])
+                            }
                         }
                     }
                 }
@@ -191,6 +198,9 @@ struct EpisodeColumn: View {
 
 private struct EpisodeRow: View {
     let resolved: ResolvedEpisode
+    /// Passed down for the episode's own extras; the episode itself is never
+    /// pending, since a filed one is no longer drawn as an episode at all.
+    let pending: [URL: PendingFiling]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -218,7 +228,7 @@ private struct EpisodeRow: View {
             }
 
             ForEach(resolved.episode.extras, id: \.file) { extra in
-                ExtraRow(extra: extra).padding(.leading, 132)
+                ExtraRow(extra: extra, filing: pending[extra.file]).padding(.leading, 132)
             }
         }
         .padding(.vertical, 3)
@@ -255,6 +265,9 @@ private struct EpisodeRow: View {
 
 private struct ExtraRow: View {
     let extra: Extra
+    /// Set when this extra is one a queued filing will produce, rather than one
+    /// that is already on disk.
+    var filing: PendingFiling? = nil
 
     var body: some View {
         HStack(spacing: 6) {
@@ -269,12 +282,16 @@ private struct ExtraRow: View {
                 .font(.caption)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let filing {
+                Badge("Pending", tone: .pending)
+                    .help("\(filing.action.title) \(filing.action.detail) — queued, not yet applied.")
+            }
         }
     }
 }
 
 struct Badge: View {
-    enum Tone { case neutral, info, warning }
+    enum Tone { case neutral, info, warning, pending }
 
     let text: String
     let tone: Tone
@@ -298,6 +315,7 @@ struct Badge: View {
         case .neutral: Color.secondary.opacity(0.12)
         case .info: Color.accentColor.opacity(0.15)
         case .warning: Color.orange.opacity(0.18)
+        case .pending: Color.purple.opacity(0.18)
         }
     }
 
@@ -306,6 +324,7 @@ struct Badge: View {
         case .neutral: .secondary
         case .info: .accentColor
         case .warning: .orange
+        case .pending: .purple
         }
     }
 }
