@@ -111,6 +111,36 @@ final class ExtrasFolderTests: XCTestCase {
         }
     }
 
+    /// The type list a view offers as destinations is the folder list with the
+    /// duplicate type collapsed — one heading per kind of extra, not per folder.
+    func testFilableTypesAreTheFolderTypesWithoutRepeats() {
+        XCTAssertEqual(
+            ExtraType.filable,
+            [.unknown, .short, .scene, .featurette, .behindTheScenes, .deletedScene, .interview, .trailer]
+        )
+
+        for type in ExtraType.filable {
+            XCTAssertNotNil(type.canonicalFolder, "\(type) is offered as a destination, so it must name one")
+        }
+    }
+
+    /// Filing means moving a file into a folder, and these types have none: they
+    /// only ever arrive by filename suffix, so nothing can be filed as one.
+    func testATypeWithNoFolderIsNotADestination() {
+        for type in [ExtraType.clip, .sample, .themeSong, .themeVideo] {
+            XCTAssertNil(type.canonicalFolder, "\(type)")
+            XCTAssertFalse(ExtraType.filable.contains(type), "\(type)")
+        }
+    }
+
+    func testTheCanonicalFolderForASharedTypeIsStable() {
+        XCTAssertEqual(
+            ExtraType.unknown.canonicalFolder?.name,
+            "extras",
+            "both extras/ and specials/ carry the type, and the first documented one has to win every time"
+        )
+    }
+
     func testNamedIsCaseAndWhitespaceInsensitive() {
         XCTAssertEqual(ExtrasFolder.named("Behind The Scenes")?.name, "behind the scenes")
         XCTAssertEqual(ExtrasFolder.named(" Trailers ")?.name, "trailers")

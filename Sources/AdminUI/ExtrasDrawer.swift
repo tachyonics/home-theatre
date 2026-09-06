@@ -56,6 +56,10 @@ struct ExtrasDrawer: View {
             return ExtraCollector.collect(.season(scanned))
         case .episode(let resolved):
             return ExtraCollector.collect(.episode(resolved.episode))
+        // The drawer is scoped to an item and an extra is not one, so selecting an
+        // extra leaves the scope on the item that owns it — this never arrives.
+        case .extra:
+            return []
         }
     }
 

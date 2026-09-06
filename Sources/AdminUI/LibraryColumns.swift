@@ -60,10 +60,32 @@ private struct SeriesRow: View {
 
 // MARK: - Seasons
 
+/// What the season column has selected.
+///
+/// A season and one of the series' extras are different kinds of thing sharing one
+/// list, so the selection has to say which it is: `List` carries a single selection
+/// type, and rows tagged with a second one are silently unselectable.
+enum SeasonSelection: Hashable {
+    case season(Int)
+    case extra(URL)
+}
+
 struct SeasonColumn: View {
     let series: ResolvedSeries?
-    @Binding var selection: Int?
+    /// Queued filings by the file each will produce, so an extra that is only
+    /// queued can be told from one already on disk.
+    let pending: [URL: PendingFiling]
+    @Binding var selection: SeasonSelection?
     @FocusState.Binding var focusedColumn: ColumnFocus?
+    /// Queues the moves that make a dragged episode an extra of *this series*,
+    /// returning false when the id names nothing — the column knows the
+    /// destination, but only the content view holds the scan the id resolves
+    /// against.
+    let fileAsSeriesExtra: (UUID, ExtrasFolder) -> Bool
+
+    /// Highlighted while a drag is over it, so a type holding nothing still reads
+    /// as somewhere a file can be dropped.
+    @State private var dropTarget: ExtraType?
 
     var body: some View {
         Group {
@@ -72,17 +94,13 @@ struct SeasonColumn: View {
                     Section("Seasons") {
                         ForEach(series.seasons, id: \.number) { season in
                             SeasonRow(season: season, scanned: scanned(season.number, in: series))
-                                .tag(season.number)
+                                .tag(SeasonSelection.season(season.number))
                         }
                     }
 
                     // Extras and unplaced files belong to the series rather than to
                     // any season, so they live here instead of in the episode pane.
-                    if !series.series.extras.isEmpty {
-                        Section("Series extras") {
-                            ForEach(series.series.extras, id: \.file) { ExtraRow(extra: $0) }
-                        }
-                    }
+                    seriesExtras(of: series)
 
                     if !series.series.unassigned.isEmpty {
                         Section("Unassigned") {
@@ -105,6 +123,118 @@ struct SeasonColumn: View {
 
     private func scanned(_ number: Int, in series: ResolvedSeries) -> Season? {
         series.series.seasons.first { $0.number == number }
+    }
+
+    // MARK: - Series extras
+
+    /// The series' own extras, under a heading per type they can be filed as.
+    ///
+    /// Every filable type gets a heading whether or not it holds anything, the same
+    /// way the extras pane keeps every folder Emby recognises: the heading is also
+    /// where an episode is dropped to make it that kind of extra, and hiding the
+    /// empty ones would leave no way to file the first one.
+    ///
+    /// Only the series' *own* extras are here — nothing gathered from the seasons
+    /// or episodes below it — because saying whose extras these are is the whole
+    /// point of listing them against the series.
+    @ViewBuilder
+    private func seriesExtras(of series: ResolvedSeries) -> some View {
+        Section("Series extras") {
+            ForEach(types(in: series), id: \.self) { type in
+                ExtraTypeHeading(type: type, count: extras(of: type, in: series).count)
+                    .listRowBackground(highlight(type))
+                    // A heading names a group, so it cannot also be a thing to
+                    // select — clicking it would leave the details drawer
+                    // describing nothing.
+                    .selectionDisabled()
+                    .help(helpText(for: type))
+                    .dropDestination(for: String.self) { items, _ in
+                        drop(items, as: type)
+                    } isTargeted: { over in
+                        dropTarget = over ? type : nil
+                    }
+
+                ForEach(extras(of: type, in: series), id: \.file) { extra in
+                    ExtraRow(extra: extra, filing: pending[extra.file], showsType: false)
+                        .padding(.leading, 14)
+                        .tag(SeasonSelection.extra(extra.file))
+                        .listRowBackground(highlight(type))
+                        // The rows take a drop too: the group is one target, and
+                        // aiming at the heading of a long list would mean
+                        // scrolling back to it.
+                        .dropDestination(for: String.self) { items, _ in
+                            drop(items, as: type)
+                        } isTargeted: { over in
+                            dropTarget = over ? type : nil
+                        }
+                }
+            }
+        }
+    }
+
+    /// Every type that can be filed, plus any that is present without being one —
+    /// a list claiming to show the series' extras must not quietly leave one out
+    /// because there is nowhere to drop a new one of its kind.
+    private func types(in series: ResolvedSeries) -> [ExtraType] {
+        var types = ExtraType.filable
+        for extra in series.series.extras where !types.contains(extra.type) {
+            types.append(extra.type)
+        }
+        return types
+    }
+
+    /// Grouped by type rather than by folder: `extras/` and `specials/` both hold
+    /// ``ExtraType/unknown`` extras, and to a client they are the same kind of
+    /// thing however they were filed.
+    private func extras(of type: ExtraType, in series: ResolvedSeries) -> [Extra] {
+        series.series.extras.filter { $0.type == type }
+    }
+
+    private func drop(_ items: [String], as type: ExtraType) -> Bool {
+        guard let folder = type.canonicalFolder else { return false }
+        // The payload is an entity id. Anything else dragged in from outside
+        // simply resolves to nothing and is refused, which is why no custom
+        // UTType is needed.
+        return items.compactMap(UUID.init(uuidString:))
+            .reduce(false) { fileAsSeriesExtra($1, folder) || $0 }
+    }
+
+    /// The whole group lights up, heading and rows together, since dropping on any
+    /// of them does the same thing.
+    private func highlight(_ type: ExtraType) -> Color {
+        dropTarget == type ? Color.accentColor.opacity(0.25) : Color.clear
+    }
+
+    private func helpText(for type: ExtraType) -> String {
+        guard let folder = type.canonicalFolder else {
+            return "Extras of this kind are bound by a filename suffix, so nothing can be filed here."
+        }
+        return "Drop an episode here to move it into the series' “\(folder.name)” folder, which makes it a \(type.displayName) extra."
+    }
+}
+
+/// Names one group of extras and how many are in it — and is the drop target for
+/// making another one.
+private struct ExtraTypeHeading: View {
+    let type: ExtraType
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(type.displayName.uppercased())
+                .font(.caption2)
+                .fontWeight(.semibold)
+            Spacer()
+            Text("\(count)")
+                .font(.caption2)
+                .monospacedDigit()
+        }
+        // Dimmed to a third level when empty: the heading is still a destination,
+        // but it should not read as loudly as one holding something.
+        .foregroundStyle(count == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+        .padding(.top, 2)
+        // The row is the target, not just the text sitting in it.
+        .contentShape(.rect)
     }
 }
 
@@ -268,15 +398,20 @@ private struct ExtraRow: View {
     /// Set when this extra is one a queued filing will produce, rather than one
     /// that is already on disk.
     var filing: PendingFiling? = nil
+    /// False where the list is already grouped by type, and repeating it on every
+    /// row would say the same thing twice.
+    var showsType = true
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "paperclip")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(extra.type.displayName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if showsType {
+                Text(extra.type.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             // Extras carry no NFO, so this filename is the on-screen title.
             Text(extra.title)
                 .font(.caption)

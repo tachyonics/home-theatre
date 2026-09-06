@@ -54,7 +54,7 @@ public enum ExtraCollector {
 
         case .series(let series):
             var collected = series.extras.map {
-                OwnedExtra(extra: $0, ownerLabel: "Series", isDirect: true)
+                OwnedExtra(extra: $0, ownerLabel: seriesLabel, isDirect: true)
             }
             for season in series.seasons {
                 let label = seasonLabel(season.number)
@@ -124,4 +124,9 @@ public enum ExtraCollector {
     public static func seasonLabel(_ number: Int) -> String {
         number == 0 ? "Specials" : "Season \(number)"
     }
+
+    /// What a series-owned extra says it belongs to. Named here for the same
+    /// reason: a view listing the series' own extras has to label them the way a
+    /// collected list does.
+    public static let seriesLabel = "Series"
 }

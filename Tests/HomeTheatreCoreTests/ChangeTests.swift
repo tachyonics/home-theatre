@@ -7,9 +7,16 @@ final class ChangeTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
-        root = URL(fileURLWithPath: NSTemporaryDirectory())
+        let created = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("change-tests-" + UUID().uuidString)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: created, withIntermediateDirectories: true)
+
+        // Canonical, because the temporary directory is reached through a symlink:
+        // `/var` → `/private/var`. Enumerating a folder reports the real path, so a
+        // URL built from an uncanonical root would differ from the one a scan
+        // produced for the same file by that prefix alone.
+        root = (try? created.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath)
+            .map { URL(fileURLWithPath: $0) } ?? created
     }
 
     override func tearDownWithError() throws {
@@ -130,8 +137,122 @@ final class ChangeTests: XCTestCase {
 
         XCTAssertEqual(
             action.intent,
-            .fileEpisodeAsExtra(folder),
+            .fileEpisodeAsExtra(folder: folder, owner: .season),
             "the browser must not have to read the decision back out of the file steps"
+        )
+    }
+
+    // MARK: - Filing an episode as an extra of the series
+
+    func testFilingUnderTheSeriesLandsInTheSeriesFolder() throws {
+        let seriesFolder = root.appendingPathComponent("Show")
+        let seasonFolder = seriesFolder.appendingPathComponent("Season 1")
+        let episode = Episode(
+            file: seasonFolder.appendingPathComponent("Show S01E03.mkv"),
+            nfoURL: seasonFolder.appendingPathComponent("Show S01E03.nfo"),
+            season: 1,
+            number: 3
+        )
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let series = Series(name: "Show", folder: seriesFolder, seasons: [season])
+        let folder = try XCTUnwrap(ExtrasFolder.named("behind the scenes"))
+
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: episode, in: series, folder: folder))
+
+        XCTAssertEqual(action.title, "Set as Behind the Scenes extra")
+        XCTAssertEqual(action.detail, "into Show/behind the scenes/")
+        XCTAssertEqual(action.intent, .fileEpisodeAsExtra(folder: folder, owner: .series))
+
+        XCTAssertEqual(
+            action.steps.map(\.sourceFile.lastPathComponent),
+            ["Show S01E03.mkv", "Show S01E03.nfo"],
+            "the sidecars travel whichever level the extra is filed at"
+        )
+        for step in action.steps {
+            guard case .move(_, let to) = step else { return XCTFail("filing only moves") }
+            XCTAssertEqual(to.deletingLastPathComponent().lastPathComponent, "behind the scenes")
+            XCTAssertEqual(
+                to.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent,
+                seriesFolder.lastPathComponent,
+                "the extras folder belongs to the series, not to the season the episode left"
+            )
+        }
+    }
+
+    func testASeriesFilingProjectsOntoTheSeriesRatherThanTheSeason() throws {
+        let seriesFolder = root.appendingPathComponent("Show")
+        let seasonFolder = seriesFolder.appendingPathComponent("Season 1")
+        let filed = Episode(file: seasonFolder.appendingPathComponent("Show S01E01.mkv"), season: 1, number: 1)
+        let untouched = Episode(file: seasonFolder.appendingPathComponent("Show S01E02.mkv"), season: 1, number: 2)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [filed, untouched])
+        let result = LibraryScanResult(
+            root: root,
+            series: [Series(name: "Show", folder: seriesFolder, seasons: [season])]
+        )
+
+        let folder = try XCTUnwrap(ExtrasFolder.named("interviews"))
+        let located = try XCTUnwrap(result.locate(episode: filed.id))
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.series, folder: folder))
+
+        var set = ChangeSet()
+        set.add(action, to: located.entityRef)
+
+        let filing = try XCTUnwrap(set.pendingFilings(in: result).first)
+        XCTAssertEqual(filing.owner, .series)
+        XCTAssertEqual(filing.destination, seriesFolder.appendingPathComponent("interviews/Show S01E01.mkv"))
+        XCTAssertEqual(filing.futureExtra.parent, .series, "an extra of the series hangs off the series")
+
+        let projected = try XCTUnwrap(result.applyingPendingFilings([filing]).series.first)
+        XCTAssertEqual(projected.extras.map(\.title), ["Show S01E01"])
+        XCTAssertEqual(projected.extras.map(\.type), [.interview])
+        XCTAssertEqual(
+            projected.seasons.first?.episodes.map(\.number),
+            [2],
+            "the episode still leaves the season it was in"
+        )
+        XCTAssertTrue(
+            projected.seasons.first?.extras.isEmpty ?? false,
+            "and must not also be drawn as an extra of the season it left"
+        )
+    }
+
+    /// The same round trip as the season case: what the browser drew before
+    /// applying has to be what the rescan finds after, one level up.
+    func testAnEpisodeFiledAsASeriesExtraRescansAsOne() throws {
+        let series = root.appendingPathComponent("Doctor Who (2005)")
+        try touch("Doctor Who (2005)/tvshow.nfo", bytes: "<tvshow><title>Doctor Who</title></tvshow>")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E01.mkv")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E01.nfo", bytes: "<episodedetails><season>1</season><episode>1</episode></episodedetails>")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E02.mkv")
+
+        let before = try LibraryScanner().scan(root: series)
+        let episode = try XCTUnwrap(before.series.first?.seasons.first?.episodes.first { $0.number == 1 })
+        let located = try XCTUnwrap(before.locate(episode: episode.id))
+
+        let folder = try XCTUnwrap(ExtrasFolder.named("behind the scenes"))
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.series, folder: folder))
+
+        var set = ChangeSet()
+        set.add(action, to: located.entityRef)
+        let filings = set.pendingFilings(in: before)
+        let projected = try XCTUnwrap(before.applyingPendingFilings(filings).series.first)
+
+        guard case .success = ChangeExecutor.apply(action) else {
+            return XCTFail("\(action.title) failed")
+        }
+
+        let after = try LibraryScanner().scan(root: series)
+        let seriesAfter = try XCTUnwrap(after.series.first)
+
+        XCTAssertEqual(seriesAfter.extras.map(\.type), [.behindTheScenes])
+        XCTAssertEqual(seriesAfter.extras.first?.folderName, "behind the scenes")
+        XCTAssertEqual(seriesAfter.seasons.first?.episodes.map(\.number), [2])
+        XCTAssertTrue(seriesAfter.unassigned.isEmpty, "a filed extra is placed, not unassigned")
+
+        XCTAssertEqual(
+            projected.extras,
+            seriesAfter.extras,
+            "the preview shown before applying must be exactly what the rescan finds after"
         )
     }
 
