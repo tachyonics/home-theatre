@@ -20,6 +20,11 @@ struct ContentView: View {
 
     @State private var selectedSeries: URL?
     @State private var selectedSeason: Int?
+    /// A series extra picked out of the season column, which sits alongside the
+    /// season selection rather than replacing it: the episode pane keeps showing
+    /// the season it was showing, because an extra says nothing about which season
+    /// the user was looking at.
+    @State private var selectedExtra: URL?
     @State private var selectedEpisode: URL?
     @State private var showingReport = false
 
@@ -90,8 +95,10 @@ struct ContentView: View {
             } content: {
                 SeasonColumn(
                     series: currentSeries,
+                    pending: pendingByDestination,
                     selection: seasonSelection,
-                    focusedColumn: $focusedColumn
+                    focusedColumn: $focusedColumn,
+                    fileAsSeriesExtra: { fileAsExtra(episodeID: $0, folder: $1, under: .series) }
                 )
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260)
             } detail: {
@@ -109,9 +116,11 @@ struct ContentView: View {
             if extrasPresented {
                 ExtrasResizeHandle(height: $extrasHeight)
                 ExtrasDrawer(
-                    target: inspectorTarget,
+                    // The drawer describes an item's extras, so it stays on the
+                    // item even while the details drawer describes one of them.
+                    target: itemTarget,
                     selection: $extrasFilter,
-                    fileAsExtra: fileAsExtra,
+                    fileAsExtra: { fileAsExtra(episodeID: $0, folder: $1, under: .season) },
                     pending: pendingByDestination
                 )
                 .frame(height: extrasHeight)
@@ -187,17 +196,32 @@ struct ContentView: View {
             selectedSeason = projectedSeries
                 .first { $0.series.folder == newValue }?
                 .seasons.first?.number
+            selectedExtra = nil
             selectedEpisode = nil
         }
     }
 
-    private var seasonSelection: Binding<Int?> {
+    private var seasonSelection: Binding<SeasonSelection?> {
         Binding {
-            selectedSeason
+            // An extra that has stopped existing — its filing was dropped from the
+            // queue, say — leaves the column showing nothing selected rather than
+            // highlighting a row that is no longer there.
+            if currentSeriesExtra != nil, let selectedExtra { return .extra(selectedExtra) }
+            return selectedSeason.map(SeasonSelection.season)
         } set: { newValue in
-            selectedSeason = newValue
             focus = .season
-            selectedEpisode = nil
+            switch newValue {
+            case .season(let number):
+                selectedSeason = number
+                selectedExtra = nil
+                selectedEpisode = nil
+            case .extra(let file):
+                // The season stays as it was: the episode pane is not what the
+                // user was changing, and emptying it would cost them their place.
+                selectedExtra = file
+            case nil:
+                selectedExtra = nil
+            }
         }
     }
 
@@ -230,19 +254,46 @@ struct ContentView: View {
         return currentSeason?.episodes.first { $0.episode.file == selectedEpisode }
     }
 
-    /// Follows the focused column, falling back outward when the focused level has
-    /// nothing selected.
-    private var inspectorTarget: InspectorTarget? {
+    /// The selected series extra, labelled the way a collected one is so the two
+    /// describe themselves identically.
+    ///
+    /// Resolved against the projected series each time rather than stored, so an
+    /// extra that only exists because something is queued stops being selected the
+    /// moment that change is dropped.
+    private var currentSeriesExtra: OwnedExtra? {
+        guard let selectedExtra,
+              let extra = currentSeries?.series.extras.first(where: { $0.file == selectedExtra })
+        else { return nil }
+        return OwnedExtra(extra: extra, ownerLabel: ExtraCollector.seriesLabel, isDirect: true)
+    }
+
+    /// The item the browsing columns have selected: follows the focused column,
+    /// falling back outward when the focused level has nothing selected.
+    private var itemTarget: InspectorTarget? {
         guard let currentSeries else { return nil }
 
         if focus == .episode, let currentEpisode {
             return .episode(currentEpisode)
+        }
+        // A selected series extra belongs to the series, so that is the item it
+        // leaves behind for anything scoped to one.
+        if focus == .season, currentSeriesExtra != nil {
+            return .series(currentSeries)
         }
         if focus != .series, let currentSeason {
             let scanned = currentSeries.series.seasons.first { $0.number == currentSeason.number }
             return .season(series: currentSeries, season: currentSeason, scanned: scanned)
         }
         return .series(currentSeries)
+    }
+
+    /// What the details drawer describes: the selected extra while the season
+    /// column is the one being worked in, and the item itself otherwise.
+    private var inspectorTarget: InspectorTarget? {
+        if focus == .season, let currentSeriesExtra {
+            return .extra(currentSeriesExtra)
+        }
+        return itemTarget
     }
 
     /// Changes whenever a scan replaces the data, so the drawer re-reads from disk.
@@ -455,19 +506,21 @@ struct ContentView: View {
 
     // MARK: - Editing
 
-    /// Queues the one action that turns an episode into an extra of its own season.
+    /// Queues the one action that turns an episode into an extra of its own season,
+    /// or of the series above it.
     ///
-    /// The season comes from the episode, not from whatever the drawer is scoped
-    /// to: an extras folder sits under the item's own folder, and an episode has no
-    /// folder of its own, so its season is the only correct destination.
-    private func fileAsExtra(episodeID: UUID, folder: ExtrasFolder) -> Bool {
+    /// Both come from the episode, not from whatever the view is scoped to: an
+    /// extras folder sits under the item's own folder, and an episode has no folder
+    /// of its own, so only its own ancestors are destinations. Which of the two is
+    /// the user's decision, and it is the section they dropped onto that says so.
+    private func fileAsExtra(episodeID: UUID, folder: ExtrasFolder, under owner: ExtrasOwner) -> Bool {
         guard let location = payload?.result.locate(episode: episodeID) else { return false }
 
-        guard let action = ExtrasFiling.action(
-            episode: location.episode,
-            in: location.season,
-            folder: folder
-        ) else { return false }
+        let action = switch owner {
+        case .series: ExtrasFiling.action(episode: location.episode, in: location.series, folder: folder)
+        case .season: ExtrasFiling.action(episode: location.episode, in: location.season, folder: folder)
+        }
+        guard let action else { return false }
 
         store.add(action, to: location.entityRef)
         return true
@@ -503,6 +556,7 @@ struct ContentView: View {
                     selectedSeries = value.resolved.first?.series.folder
                 }
                 selectedSeason = defaultSeason
+                selectedExtra = nil
                 selectedEpisode = nil
                 focus = .series
             case .failure(let error):

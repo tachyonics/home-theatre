@@ -20,25 +20,44 @@ public struct PendingFiling: Sendable, Hashable, Identifiable {
     public var season: Season
     public var episode: Episode
     public var folder: ExtrasFolder
+    /// Which of the two the extra is being filed under. Both are ancestors of the
+    /// episode, so this picks between them rather than naming a third thing.
+    public var owner: ExtrasOwner
 
     /// The action's, so a row previewing a change and the queue row for it are the
     /// same thing under two views.
     public var id: UUID { action.id }
 
-    public init(action: PendingAction, series: Series, season: Season, episode: Episode, folder: ExtrasFolder) {
+    public init(
+        action: PendingAction,
+        series: Series,
+        season: Season,
+        episode: Episode,
+        folder: ExtrasFolder,
+        owner: ExtrasOwner
+    ) {
         self.action = action
         self.series = series
         self.season = season
         self.episode = episode
         self.folder = folder
+        self.owner = owner
+    }
+
+    /// The folder the extras sub-folder sits in — the owning item's own folder.
+    public var ownerFolder: URL {
+        switch owner {
+        case .series: series.folder
+        case .season: season.folder
+        }
     }
 
     /// Where the video will sit once applied.
     ///
     /// The same expression ``ExtrasFiling`` builds its move steps from — under the
-    /// season that holds the episode, never under whatever the user has selected.
+    /// item the filing named, never under whatever the user has since selected.
     public var destination: URL {
-        season.folder
+        ownerFolder
             .appendingPathComponent(folder.name, isDirectory: true)
             .appendingPathComponent(episode.file.lastPathComponent)
     }
@@ -46,7 +65,7 @@ public struct PendingFiling: Sendable, Hashable, Identifiable {
     /// The extra a rescan would find after applying, built to match what
     /// ``LibraryScanner`` produces for a file in an extras folder: the type comes
     /// from the folder, the title from the filename stem, and the parent is the
-    /// season whose folder contains it.
+    /// item whose folder contains it.
     ///
     /// Matching the scanner exactly is the point — a preview that differs from the
     /// result is worse than no preview, so the two are asserted equal in the tests.
@@ -54,7 +73,7 @@ public struct PendingFiling: Sendable, Hashable, Identifiable {
         Extra(
             file: destination,
             type: folder.type,
-            parent: .season(season.number),
+            parent: owner == .series ? .series : .season(season.number),
             title: destination.deletingPathExtension().lastPathComponent,
             folderName: folder.name
         )
@@ -70,7 +89,7 @@ extension ChangeSet {
     /// guards rescans against it.
     public func pendingFilings(in result: LibraryScanResult) -> [PendingFiling] {
         allActions.compactMap { entity, action in
-            guard case .fileEpisodeAsExtra(let folder) = action.intent,
+            guard case .fileEpisodeAsExtra(let folder, let owner) = action.intent,
                   let location = result.locate(episode: entity.id)
             else { return nil }
 
@@ -79,7 +98,8 @@ extension ChangeSet {
                 series: location.series,
                 season: location.season,
                 episode: location.episode,
-                folder: folder
+                folder: folder,
+                owner: owner
             )
         }
     }
@@ -103,7 +123,17 @@ extension LibraryScanResult {
         guard !filings.isEmpty else { return self }
 
         let filed = Set(filings.map(\.episode.id))
-        let arriving = Dictionary(grouping: filings, by: \.season.id).mapValues { $0.map(\.futureExtra) }
+        // Grouped by the item each lands on, not by the one it came from: a filing
+        // made against the series leaves its season the same way, but the extra it
+        // produces belongs a level up.
+        let arrivingAtSeason = Dictionary(
+            grouping: filings.filter { $0.owner == .season },
+            by: \.season.id
+        ).mapValues { $0.map(\.futureExtra) }
+        let arrivingAtSeries = Dictionary(
+            grouping: filings.filter { $0.owner == .series },
+            by: \.series.id
+        ).mapValues { $0.map(\.futureExtra) }
 
         var projected = self
         projected.series = series.map { series in
@@ -118,9 +148,10 @@ extension LibraryScanResult {
                 // makes of it. Showing that now is what stops the preview being
                 // rosier than the result.
                 season.extras += leaving.flatMap(\.extras)
-                season.extras += arriving[season.id] ?? []
+                season.extras += arrivingAtSeason[season.id] ?? []
                 return season
             }
+            series.extras += arrivingAtSeries[series.id] ?? []
             return series
         }
         return projected

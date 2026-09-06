@@ -41,6 +41,26 @@ public enum ExtraType: String, Sendable, Hashable, Codable, CaseIterable {
         ("-other", .unknown),
     ]
 
+    /// The types an extra can be *filed as*, in the order Emby documents their
+    /// folders. Filing means moving a file into a recognised folder, so a type with
+    /// no folder of its own — `clip` and `sample`, which only ever arrive by
+    /// filename suffix — names no destination and is not offered as one.
+    ///
+    /// Deduplicated: `extras` and `specials` are both ``unknown``, and one type
+    /// listed twice would be two headings for one thing.
+    public static let filable: [ExtraType] = ExtrasFolder.all.reduce(into: []) { types, folder in
+        if !types.contains(folder.type) { types.append(folder.type) }
+    }
+
+    /// Where an extra of this type is filed when the *type* is what was chosen.
+    ///
+    /// The first folder documented for the type wins, which is what makes the
+    /// choice stable: ``unknown`` resolves to `extras/` rather than `specials/`
+    /// every time, instead of depending on what happens to be on disk already.
+    public var canonicalFolder: ExtrasFolder? {
+        ExtrasFolder.all.first { $0.type == self }
+    }
+
     public var displayName: String {
         switch self {
         case .unknown: "Extra"

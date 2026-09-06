@@ -7,12 +7,18 @@ enum InspectorTarget: Equatable {
     case series(ResolvedSeries)
     case season(series: ResolvedSeries, season: ResolvedSeason, scanned: Season?)
     case episode(ResolvedEpisode)
+    /// One extra, carried with the item it belongs to. Extras are not part of the
+    /// three-column hierarchy — they hang off it — so this case says nothing about
+    /// what is selected in the browsing columns.
+    case extra(OwnedExtra)
 
     var title: String {
         switch self {
         case .series(let resolved): resolved.series.name
         case .season(_, let season, _): season.number == 0 ? "Specials" : "Season \(season.number)"
         case .episode(let resolved): resolved.episode.title ?? resolved.episode.file.lastPathComponent
+        // Extras carry no NFO, so the filename is the on-screen title.
+        case .extra(let owned): owned.extra.title
         }
     }
 
@@ -21,6 +27,9 @@ enum InspectorTarget: Equatable {
         case .series: "Series"
         case .season: "Season"
         case .episode: "Episode"
+        // The kind of thing, as at every other level. Which kind of extra is a
+        // fact about it, and is stated once, below.
+        case .extra: "Extra"
         }
     }
 
@@ -29,6 +38,8 @@ enum InspectorTarget: Equatable {
         case .series(let resolved): resolved.series.nfoURL
         case .season(_, _, let scanned): scanned?.nfoURL
         case .episode(let resolved): resolved.episode.nfoURL
+        // Emby reads no sidecar for an extra — there is nothing to read.
+        case .extra: nil
         }
     }
 
@@ -38,14 +49,19 @@ enum InspectorTarget: Equatable {
         case .series(let resolved): resolved.series.folder
         case .season(_, _, let scanned): scanned?.folder ?? URL(fileURLWithPath: "/")
         case .episode(let resolved): resolved.episode.file
+        case .extra(let owned): owned.extra.file
         }
     }
 
-    var level: ItemLevel {
+    /// Nil for an extra, which sits at no level of the hierarchy: it is a file
+    /// hanging off an item rather than an item of its own, and the capability
+    /// list is defined per level.
+    var level: ItemLevel? {
         switch self {
         case .series: .series
         case .season: .season
         case .episode: .episode
+        case .extra: nil
         }
     }
 
@@ -54,14 +70,18 @@ enum InspectorTarget: Equatable {
         case .series(let resolved): resolved.series.assets
         case .season(_, _, let scanned): scanned?.assets ?? []
         case .episode(let resolved): resolved.episode.assets
+        // The scanner claims nothing beside an extra: the files in an extras
+        // folder are the extras, not artwork for them.
+        case .extra: []
         }
     }
 
-    /// What this item supplies to a client. Extras are deliberately absent:
-    /// they are the bottom drawer's subject, at a wider scope — everything
+    /// What this item supplies to a client. The item's own extras are deliberately
+    /// absent: they are the bottom drawer's subject, at a wider scope — everything
     /// beneath the item too — and duplicating them here would only disagree.
     var capabilityEntries: [CapabilityInventory.Entry] {
-        CapabilityInventory.entries(level: level, nfoURL: nfoURL, assets: assets)
+        guard let level else { return [] }
+        return CapabilityInventory.entries(level: level, nfoURL: nfoURL, assets: assets)
     }
 }
 
@@ -81,8 +101,13 @@ struct InspectorView: View {
                         header(target)
                         Divider()
                         resolvedSection(target)
-                        Divider()
-                        capabilitySection(target)
+                        // An extra has no capabilities to list — no sidecar, no
+                        // artwork of its own — so the section is absent rather
+                        // than present and empty.
+                        if let level = target.level {
+                            Divider()
+                            capabilitySection(target, level: level)
+                        }
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,6 +196,14 @@ struct InspectorView: View {
                 if episode.locked { pair("Locked", "yes") }
                 if !episode.extras.isEmpty { pair("Extras", "\(episode.extras.count)") }
                 providerIDs(episode.providerIds)
+
+            case .extra(let owned):
+                pair("Type", owned.extra.type.displayName)
+                // The two ways an extra can be bound, and the only thing that
+                // decides its type — worth naming, since neither is metadata.
+                pair("Filed under", owned.extra.folderName.map { "\($0)/" } ?? "filename suffix")
+                pair("Belongs to", owned.ownerLabel)
+                pair("File", owned.extra.file.lastPathComponent)
             }
         }
     }
@@ -208,7 +241,7 @@ struct InspectorView: View {
     /// capability list — every one this level can have, present or not — and the
     /// files are what sits underneath the one you pick.
     @ViewBuilder
-    private func capabilitySection(_ target: InspectorTarget) -> some View {
+    private func capabilitySection(_ target: InspectorTarget, level: ItemLevel) -> some View {
         let entries = target.capabilityEntries
         // The selection outlives the target it was made against, and an episode
         // has no Poster; fall back rather than showing an empty picker.
@@ -238,7 +271,7 @@ struct InspectorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             switch resolved.capability {
-            case .details: nfoBody(target)
+            case .details: nfoBody(target, level: level)
             default: AssetList(entry: resolved)
             }
         }
@@ -247,7 +280,7 @@ struct InspectorView: View {
     // MARK: - NFO
 
     @ViewBuilder
-    private func nfoBody(_ target: InspectorTarget) -> some View {
+    private func nfoBody(_ target: InspectorTarget, level: ItemLevel) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let url = target.nfoURL {
                 Text(url.lastPathComponent)
@@ -267,7 +300,7 @@ struct InspectorView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                AcceptedNames(capability: .details, level: target.level)
+                AcceptedNames(capability: .details, level: level)
             } else if let inspection {
                 fieldList(inspection)
                 DisclosureGroup("Source") {

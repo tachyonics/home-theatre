@@ -65,8 +65,8 @@ public enum FileStep: Sendable, Hashable, Codable {
 /// earn a case, and an action with no case here still applies perfectly well.
 public enum PendingIntent: Sendable, Hashable, Codable {
     /// The episode this action hangs off becomes an extra in the given folder of
-    /// its own season.
-    case fileEpisodeAsExtra(ExtrasFolder)
+    /// the named ancestor — its own season, or the series above it.
+    case fileEpisodeAsExtra(folder: ExtrasFolder, owner: ExtrasOwner)
 }
 
 /// One thing the user decided, which may take several file operations to carry out.
