@@ -51,6 +51,24 @@ public enum FileStep: Sendable, Hashable, Codable {
     }
 }
 
+/// What an action would make true, as opposed to how it goes about it.
+///
+/// ``PendingAction/steps`` already say how — enough to carry the change out, and
+/// deliberately blind to what it means. That is the wrong end for a browser that
+/// wants to show the queued change *in place*: reading "move these four files into
+/// `featurettes/`" back into "this episode becomes a featurette extra" means
+/// re-deriving a decision that was already made. The intent records the decision
+/// itself, so the view can project the library as it will be without replaying
+/// filesystem operations in its head.
+///
+/// Deliberately a small, closed set: only changes worth previewing in the browser
+/// earn a case, and an action with no case here still applies perfectly well.
+public enum PendingIntent: Sendable, Hashable, Codable {
+    /// The episode this action hangs off becomes an extra in the given folder of
+    /// its own season.
+    case fileEpisodeAsExtra(ExtrasFolder)
+}
+
 /// One thing the user decided, which may take several file operations to carry out.
 ///
 /// The unit here is *intent*, not mechanism. "Set as Featurette extra" is a single
@@ -71,11 +89,16 @@ public struct PendingAction: Sendable, Hashable, Codable, Identifiable {
     public var detail: String
     /// Carried out in order, all or nothing.
     public var steps: [FileStep]
+    /// What this would make true, when the change is one the browser can show in
+    /// place. Nil for actions with nothing to preview — the queue does not care
+    /// either way, since applying an action only ever walks its steps.
+    public var intent: PendingIntent?
 
-    public init(title: String, detail: String = "", steps: [FileStep]) {
+    public init(title: String, detail: String = "", steps: [FileStep], intent: PendingIntent? = nil) {
         self.title = title
         self.detail = detail
         self.steps = steps
+        self.intent = intent
     }
 }
 

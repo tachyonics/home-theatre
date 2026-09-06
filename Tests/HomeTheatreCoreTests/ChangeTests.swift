@@ -120,6 +120,106 @@ final class ChangeTests: XCTestCase {
         }
     }
 
+    func testAFilingSaysWhatItWouldMakeTrue() throws {
+        let seasonFolder = root.appendingPathComponent("Season 1")
+        let episode = Episode(file: seasonFolder.appendingPathComponent("Show S01E03.mkv"), season: 1, number: 3)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let folder = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: folder))
+
+        XCTAssertEqual(
+            action.intent,
+            .fileEpisodeAsExtra(folder),
+            "the browser must not have to read the decision back out of the file steps"
+        )
+    }
+
+    // MARK: - Projecting the queue back onto the library
+
+    func testAQueuedFilingProjectsOntoTheSeasonThatHoldsTheEpisode() throws {
+        let seasonFolder = root.appendingPathComponent("Show/Season 2")
+        let episode = Episode(file: seasonFolder.appendingPathComponent("Show S02E04.mkv"), season: 2, number: 4)
+        let season = Season(number: 2, folder: seasonFolder, episodes: [episode])
+        let series = Series(name: "Show", folder: root.appendingPathComponent("Show"), seasons: [season])
+        let result = LibraryScanResult(root: root, series: [series])
+
+        let folder = try XCTUnwrap(ExtrasFolder.named("interviews"))
+        let located = try XCTUnwrap(result.locate(episode: episode.id))
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.season, folder: folder))
+
+        var set = ChangeSet()
+        set.add(action, to: located.entityRef)
+
+        let filings = set.pendingFilings(in: result)
+        XCTAssertEqual(filings.count, 1)
+        let filing = try XCTUnwrap(filings.first)
+
+        XCTAssertEqual(filing.folder, folder)
+        XCTAssertEqual(filing.season.number, 2, "the season holding the episode, not the one selected")
+        XCTAssertEqual(filing.series.name, "Show")
+        XCTAssertEqual(filing.destination, seasonFolder.appendingPathComponent("interviews/Show S02E04.mkv"))
+        XCTAssertEqual(filing.id, action.id, "a projection and its queue row are one change")
+    }
+
+    func testAProjectedLibraryShowsTheEpisodeWhereItIsGoing() throws {
+        let seasonFolder = root.appendingPathComponent("Show/Season 1")
+        let filed = Episode(file: seasonFolder.appendingPathComponent("Show S01E01.mkv"), season: 1, number: 1)
+        let untouched = Episode(file: seasonFolder.appendingPathComponent("Show S01E02.mkv"), season: 1, number: 2)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [filed, untouched])
+        let series = Series(name: "Show", folder: root.appendingPathComponent("Show"), seasons: [season])
+        let result = LibraryScanResult(root: root, series: [series])
+
+        let folder = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+        let located = try XCTUnwrap(result.locate(episode: filed.id))
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.season, folder: folder))
+
+        var set = ChangeSet()
+        set.add(action, to: located.entityRef)
+
+        let projected = result.applyingPendingFilings(set.pendingFilings(in: result))
+        let projectedSeason = try XCTUnwrap(projected.series.first?.seasons.first)
+
+        XCTAssertEqual(
+            projectedSeason.episodes.map(\.number),
+            [2],
+            "a filed episode stops being drawn where it no longer belongs"
+        )
+        XCTAssertEqual(projectedSeason.extras.map(\.folderName), ["featurettes"])
+        XCTAssertEqual(projectedSeason.extras.map(\.title), ["Show S01E01"])
+        XCTAssertEqual(projectedSeason.id, season.id, "projecting must not re-identify what it did not change")
+
+        XCTAssertNil(
+            projected.locate(episode: filed.id),
+            "the projection describes a disk that does not exist yet, so it cannot be queued against"
+        )
+        XCTAssertNotNil(projected.locate(episode: untouched.id), "everything else stays findable")
+    }
+
+    func testProjectingNothingChangesNothing() throws {
+        let season = Season(
+            number: 1,
+            folder: root.appendingPathComponent("Season 1"),
+            episodes: [Episode(file: root.appendingPathComponent("Season 1/Show S01E01.mkv"), season: 1, number: 1)]
+        )
+        let result = LibraryScanResult(root: root, series: [Series(name: "Show", folder: root, seasons: [season])])
+
+        let projected = result.applyingPendingFilings([])
+        XCTAssertEqual(projected.series.first?.seasons.first?.episodes.count, 1)
+        XCTAssertTrue(projected.series.first?.seasons.first?.extras.isEmpty ?? false)
+    }
+
+    func testActionsWithNothingToPreviewProjectToNothing() {
+        let entity = EntityRef(id: UUID(), level: .episode, label: "S01E03")
+        var set = ChangeSet()
+        set.add(action("a"), to: entity)
+
+        XCTAssertTrue(
+            set.pendingFilings(in: LibraryScanResult(root: root, series: [])).isEmpty,
+            "an action carrying no intent, and one naming an episode this scan does not have, both project to nothing"
+        )
+    }
+
     func testTwoFoldersSharingATypeAreDistinguishable() throws {
         let seasonFolder = root.appendingPathComponent("Season 1")
         let episode = Episode(file: seasonFolder.appendingPathComponent("Show S01E03.mkv"), season: 1, number: 3)
@@ -294,6 +394,13 @@ final class ChangeTests: XCTestCase {
         let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.season, folder: folder))
         XCTAssertEqual(action.steps.count, 4, "one action: video, NFO, thumb and subtitle track")
 
+        // What the browser draws while the change is still queued.
+        var set = ChangeSet()
+        set.add(action, to: located.entityRef)
+        let filings = set.pendingFilings(in: before)
+        let projected = try XCTUnwrap(filings.first)
+        let projectedSeason = try XCTUnwrap(before.applyingPendingFilings(filings).series.first?.seasons.first)
+
         guard case .success = ChangeExecutor.apply(action) else {
             return XCTFail("\(action.title) failed")
         }
@@ -312,6 +419,18 @@ final class ChangeTests: XCTestCase {
         XCTAssertEqual(seasonAfter.extras.first?.folderName, "featurettes")
         XCTAssertEqual(seasonAfter.extras.first?.title, "Doctor Who S01E01")
         XCTAssertTrue(after.series.first?.unassigned.isEmpty ?? false, "a filed extra is placed, not unassigned")
+
+        XCTAssertEqual(
+            projected.futureExtra,
+            seasonAfter.extras.first,
+            "the preview shown before applying must be exactly what the rescan finds after"
+        )
+        XCTAssertEqual(
+            projectedSeason.episodes.map(\.number),
+            seasonAfter.episodes.map(\.number),
+            "and the season the preview drew must be the season that results"
+        )
+        XCTAssertEqual(projectedSeason.extras, seasonAfter.extras)
     }
 
     private func action(_ title: String) -> PendingAction {

@@ -11,6 +11,10 @@ struct ExtrasDrawer: View {
     /// when the id names nothing — the drawer knows the destination, but only the
     /// content view holds the scan the id has to be resolved against.
     let fileAsExtra: (UUID, ExtrasFolder) -> Bool
+    /// Queued filings by the file they will produce, so a projected extra can be
+    /// told from one already on disk. Only the badge distinguishes them — the list
+    /// they sit in has already been projected forward.
+    let pending: [URL: PendingFiling]
 
     /// Highlighted while a drag is over it, so an empty row still reads as a target.
     @State private var dropTarget: String?
@@ -24,6 +28,24 @@ struct ExtrasDrawer: View {
         case filenameSuffix
     }
 
+    /// `Table` needs identity, and a file path is unique per extra — including the
+    /// projected ones, which name a file that does not exist yet precisely because
+    /// nothing is there to collide with. Kept out of the model so the choice of
+    /// identifier stays a presentation concern.
+    private struct Row: Identifiable {
+        let owned: OwnedExtra
+        var id: URL { owned.extra.file }
+
+        /// Set when this extra is one a queued filing will create.
+        func filing(in pending: [URL: PendingFiling]) -> PendingFiling? {
+            pending[owned.extra.file]
+        }
+    }
+
+    /// The extras of whatever is selected. The scan behind this has already had the
+    /// queue applied to it, so a filing the user has just made is in here as an
+    /// ordinary extra of its season — which is what makes it appear in the folder
+    /// it was dropped on, and disappear from the season it left.
     private var extras: [OwnedExtra] {
         guard let target else { return [] }
         switch target {
@@ -122,21 +144,20 @@ struct ExtrasDrawer: View {
 
     // MARK: - Extras
 
-    /// `Table` needs identity, and a file path is unique per extra. Kept out of the
-    /// model so the choice of identifier stays a presentation concern.
-    private struct Row: Identifiable {
-        let owned: OwnedExtra
-        var id: URL { owned.extra.file }
-    }
-
     private var extraList: some View {
         Table(visible.map(Row.init)) {
             TableColumn("Title") { row in
-                // Extras carry no NFO, so this filename is the on-screen title.
-                Text(row.owned.extra.title)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(row.owned.extra.file.path)
+                HStack(spacing: 6) {
+                    // Extras carry no NFO, so this filename is the on-screen title.
+                    Text(row.owned.extra.title)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if let filing = row.filing(in: pending) {
+                        Badge("Pending", tone: .pending)
+                            .help("\(filing.action.title) \(filing.action.detail) — queued, not yet applied.")
+                    }
+                }
+                .help(row.owned.extra.file.path)
             }
             TableColumn("Type") { row in
                 Text(row.owned.extra.type.displayName).foregroundStyle(.secondary)

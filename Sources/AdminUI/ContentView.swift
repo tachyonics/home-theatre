@@ -82,7 +82,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             NavigationSplitView {
                 SeriesColumn(
-                    series: payload?.resolved ?? [],
+                    series: projectedSeries,
                     selection: seriesSelection,
                     focusedColumn: $focusedColumn
                 )
@@ -98,6 +98,7 @@ struct ContentView: View {
                 EpisodeColumn(
                     series: currentSeries,
                     season: currentSeason,
+                    pending: pendingByDestination,
                     selection: episodeSelection,
                     focusedColumn: $focusedColumn
                 )
@@ -110,7 +111,8 @@ struct ContentView: View {
                 ExtrasDrawer(
                     target: inspectorTarget,
                     selection: $extrasFilter,
-                    fileAsExtra: fileAsExtra
+                    fileAsExtra: fileAsExtra,
+                    pending: pendingByDestination
                 )
                 .frame(height: extrasHeight)
             }
@@ -182,7 +184,7 @@ struct ContentView: View {
             selectedSeries = newValue
             focus = .series
             // Populate the episode pane, without claiming the user asked for it.
-            selectedSeason = payload?.resolved
+            selectedSeason = projectedSeries
                 .first { $0.series.folder == newValue }?
                 .seasons.first?.number
             selectedEpisode = nil
@@ -210,7 +212,7 @@ struct ContentView: View {
 
     private var currentSeries: ResolvedSeries? {
         guard let selectedSeries else { return nil }
-        return payload?.resolved.first { $0.series.folder == selectedSeries }
+        return projectedSeries.first { $0.series.folder == selectedSeries }
     }
 
     private var currentSeason: ResolvedSeason? {
@@ -245,6 +247,43 @@ struct ContentView: View {
 
     /// Changes whenever a scan replaces the data, so the drawer re-reads from disk.
     private var payloadStamp: URL? { payload?.result.root }
+
+    /// The queue projected onto the scan it was made against.
+    ///
+    /// Read from the *scanned* result, never the projected one: a filing is queued
+    /// against files that are still where the scan found them, and the projection
+    /// describes a disk that does not exist yet.
+    ///
+    /// Derived rather than stored: the queue and the scan are each the single
+    /// source of their own truth, and a cached projection would be one more thing
+    /// to invalidate every time either moves.
+    private var pendingFilings: [PendingFiling] {
+        guard let payload else { return [] }
+        return store.changeSet.pendingFilings(in: payload.result)
+    }
+
+    /// Which files in the browser are there because something is queued.
+    private var pendingByDestination: [URL: PendingFiling] {
+        Dictionary(pendingFilings.map { ($0.destination, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// What the browser draws: the library with every queued filing already carried
+    /// out. An episode dropped on an extras folder leaves its season and appears in
+    /// that folder immediately, badged as pending — the change is shown as the
+    /// outcome the user asked for, not as an annotation on the state they left.
+    ///
+    /// Display order is re-derived because a season that has lost an episode
+    /// renumbers, and the ordering is the whole point of that column. It costs
+    /// nothing in the ordinary case: an empty queue short-circuits to the resolved
+    /// series the scan already produced.
+    private var projectedSeries: [ResolvedSeries] {
+        guard let payload else { return [] }
+        let filings = pendingFilings
+        guard !filings.isEmpty else { return payload.resolved }
+
+        let resolver = DisplayOrderResolver()
+        return payload.result.applyingPendingFilings(filings).series.map(resolver.resolve)
+    }
 
     // MARK: - Chrome
 
