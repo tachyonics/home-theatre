@@ -155,8 +155,7 @@ struct SeasonColumn: View {
                     }
 
                 ForEach(extras(of: type, in: series), id: \.file) { extra in
-                    ExtraRow(extra: extra, filing: pending[extra.file], showsType: false)
-                        .padding(.leading, 14)
+                    extraRow(extra)
                         .tag(SeasonSelection.extra(extra.file))
                         .listRowBackground(highlight(type))
                         // The rows take a drop too: the group is one target, and
@@ -169,6 +168,26 @@ struct SeasonColumn: View {
                         }
                 }
             }
+        }
+    }
+
+    /// An extra that is only queued stays draggable, because the decision that put
+    /// it here is still a decision — it can be moved to another type, or dropped
+    /// back on the season to be an episode again. What is dragged is the episode
+    /// id, exactly as when it left the season: the queue is superseded rather than
+    /// added to, so the second drop describes the same move from the same start.
+    ///
+    /// An extra already on disk carries no such id and stays put. Moving one is a
+    /// different change — nothing about it says which episode, if any, it once was.
+    @ViewBuilder
+    private func extraRow(_ extra: Extra) -> some View {
+        let row = ExtraRow(extra: extra, filing: pending[extra.file], showsType: false)
+            .padding(.leading, 14)
+
+        if let filing = pending[extra.file] {
+            row.draggable(filing.episode.id.uuidString)
+        } else {
+            row
         }
     }
 
@@ -283,6 +302,14 @@ struct EpisodeColumn: View {
     let pending: [URL: PendingFiling]
     @Binding var selection: URL?
     @FocusState.Binding var focusedColumn: ColumnFocus?
+    /// Cancels the queued filing that took an episode out of this season, putting
+    /// it back among the episodes. Returns false when the id names nothing queued,
+    /// or something queued out of a different season.
+    let restoreToSeason: (UUID) -> Bool
+
+    /// Highlighted while a drag is over the list, since the target here is the
+    /// season as a whole rather than any one row in it.
+    @State private var isDropTargeted = false
 
     var body: some View {
         Group {
@@ -308,6 +335,25 @@ struct EpisodeColumn: View {
                 }
                 .listStyle(.inset)
                 .focused($focusedColumn, equals: .episode)
+                // The whole list, not a row: dropping here says "this belongs in
+                // the season", which is about the season and not about whichever
+                // episode the cursor happened to be over.
+                .dropDestination(for: String.self) { items, _ in
+                    items.compactMap(UUID.init(uuidString:))
+                        .reduce(false) { restoreToSeason($1) || $0 }
+                } isTargeted: { over in
+                    isDropTargeted = over
+                }
+                .overlay {
+                    if isDropTargeted {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                            .padding(2)
+                            // The border reports the target; the drop is the
+                            // list's, and must not be caught on the way in.
+                            .allowsHitTesting(false)
+                    }
+                }
             } else {
                 ContentUnavailableView("No season selected", systemImage: "list.bullet.indent")
             }

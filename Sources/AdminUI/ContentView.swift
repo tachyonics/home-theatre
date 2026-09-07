@@ -107,7 +107,8 @@ struct ContentView: View {
                     season: currentSeason,
                     pending: pendingByDestination,
                     selection: episodeSelection,
-                    focusedColumn: $focusedColumn
+                    focusedColumn: $focusedColumn,
+                    restoreToSeason: restoreToSeason
                 )
             }
             .navigationSplitViewStyle(.balanced)
@@ -522,8 +523,30 @@ struct ContentView: View {
         }
         guard let action else { return false }
 
-        store.add(action, to: location.entityRef)
+        // Filed, not added: a second filing of the same episode is the user
+        // revising one decision, and the queue records what will be true rather
+        // than the route they took to it.
+        store.file(action, to: location.entityRef)
         return true
+    }
+
+    /// Puts a queued episode back where it came from, by forgetting the filing that
+    /// took it out.
+    ///
+    /// Nothing has been applied, so the episode is still in its season on disk and
+    /// there is nothing to move — undoing the decision is the whole of the change.
+    /// An episode with no filing queued, and one whose season is not the one being
+    /// shown, are both refused: the first would mean nothing, and the second would
+    /// quietly do something other than what the drop said.
+    private func restoreToSeason(episodeID: UUID) -> Bool {
+        guard let filing = pendingFilings.first(where: { $0.episode.id == episodeID }),
+              filing.series.folder == selectedSeries,
+              // Where the browser will draw it once the filing is gone, which is
+              // the pane it had to be dropped on for the drop to mean this.
+              (filing.episode.displaySeason ?? filing.episode.season ?? 0) == selectedSeason
+        else { return false }
+
+        return store.cancelFilings(forEntityID: episodeID)
     }
 
     private func scan(_ url: URL) {

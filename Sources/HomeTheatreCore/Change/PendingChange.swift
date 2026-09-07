@@ -100,6 +100,13 @@ public struct PendingAction: Sendable, Hashable, Codable, Identifiable {
         self.steps = steps
         self.intent = intent
     }
+
+    /// Whether this action decides where an episode is filed — the one kind of
+    /// decision a later one about the same episode replaces rather than adds to.
+    public var isFiling: Bool {
+        if case .fileEpisodeAsExtra = intent { return true }
+        return false
+    }
 }
 
 /// Everything queued, grouped by entity, in the order it was queued.
@@ -128,6 +135,43 @@ public struct ChangeSet: Sendable, Codable {
     /// and plays no part in identity.
     public func actions(forEntityID id: UUID) -> [PendingAction] {
         actionsByEntity[id] ?? []
+    }
+
+    /// The filings queued for one entity. At most one after any call to
+    /// ``file(_:for:)``, but read as a list so nothing has to assume that.
+    public func filings(forEntityID id: UUID) -> [PendingAction] {
+        actions(forEntityID: id).filter(\.isFiling)
+    }
+
+    /// Queues a filing, dropping whichever filing was already queued for the same
+    /// entity.
+    ///
+    /// Filing an episode twice is one decision revised, not two decisions taken.
+    /// Dragging it to `featurettes` and then to `interviews` is a user changing
+    /// their mind, and what they want applied is the second — a queue holding both
+    /// would move the file twice to reach the same place, and would read as two
+    /// changes to review when only one thing is going to happen.
+    ///
+    /// Superseding is sound because every filing is built against the same scan:
+    /// nothing has been applied, so the files are still where the scan found them,
+    /// and the replacement describes the whole move from that state to the one the
+    /// user has now asked for. The queue stays a list of outcomes rather than a
+    /// record of the route taken to them.
+    public mutating func file(_ action: PendingAction, for entity: EntityRef) {
+        removeFilings(forEntityID: entity.id)
+        add(action, to: entity)
+    }
+
+    /// Drops every filing queued for an entity, returning what it removed.
+    ///
+    /// This is how a filing is undone: an episode that has not been applied is
+    /// still in its season on disk, so putting it back is a matter of the queue
+    /// forgetting the decision, not of moving anything.
+    @discardableResult
+    public mutating func removeFilings(forEntityID id: UUID) -> [PendingAction] {
+        let filings = filings(forEntityID: id)
+        for action in filings { remove(actionID: action.id) }
+        return filings
     }
 
     public mutating func add(_ action: PendingAction, to entity: EntityRef) {
