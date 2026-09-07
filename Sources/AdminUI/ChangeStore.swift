@@ -25,6 +25,25 @@ final class ChangeStore {
         changeSet.add(action, to: entity)
     }
 
+    /// Queues a filing, replacing the one already queued for the same entity —
+    /// see ``ChangeSet/file(_:for:)`` for why a second filing supersedes rather
+    /// than stacks.
+    func file(_ action: PendingAction, to entity: EntityRef) {
+        for superseded in changeSet.filings(forEntityID: entity.id) {
+            failures[superseded.id] = nil
+        }
+        changeSet.file(action, for: entity)
+    }
+
+    /// Undoes a queued filing. False when there was none, so a drop that means
+    /// nothing can be refused rather than silently accepted.
+    @discardableResult
+    func cancelFilings(forEntityID id: UUID) -> Bool {
+        let cancelled = changeSet.removeFilings(forEntityID: id)
+        for action in cancelled { failures[action.id] = nil }
+        return !cancelled.isEmpty
+    }
+
     func remove(actionID: UUID) {
         changeSet.remove(actionID: actionID)
         failures[actionID] = nil

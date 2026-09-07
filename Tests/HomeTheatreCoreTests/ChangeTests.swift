@@ -256,6 +256,112 @@ final class ChangeTests: XCTestCase {
         )
     }
 
+    // MARK: - Revising a filing
+
+    /// A queued episode has not moved yet, so a second filing has to describe the
+    /// whole move from where the scan found it — not a move from the folder the
+    /// first filing was going to put it in.
+    func testFilingAgainReplacesTheFirstDecision() throws {
+        let seriesFolder = root.appendingPathComponent("Show")
+        let seasonFolder = seriesFolder.appendingPathComponent("Season 1")
+        let episode = Episode(
+            file: seasonFolder.appendingPathComponent("Show S01E03.mkv"),
+            nfoURL: seasonFolder.appendingPathComponent("Show S01E03.nfo"),
+            season: 1,
+            number: 3
+        )
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let series = Series(name: "Show", folder: seriesFolder, seasons: [season])
+        let result = LibraryScanResult(root: root, series: [series])
+        let located = try XCTUnwrap(result.locate(episode: episode.id))
+
+        let featurettes = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+        let interviews = try XCTUnwrap(ExtrasFolder.named("interviews"))
+
+        var set = ChangeSet()
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: featurettes)), for: located.entityRef)
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: interviews)), for: located.entityRef)
+
+        XCTAssertEqual(set.count, 1, "changing your mind is one queued change, not two")
+        XCTAssertEqual(set.entities.count, 1)
+
+        let filing = try XCTUnwrap(set.pendingFilings(in: result).first)
+        XCTAssertEqual(filing.folder, interviews, "the second decision is the one that stands")
+        XCTAssertEqual(
+            filing.action.steps.map(\.sourceFile),
+            [episode.file, try XCTUnwrap(episode.nfoURL)],
+            "the steps still start from the scan, since nothing has been applied"
+        )
+    }
+
+    /// The level can change too: filed as a season extra, then dragged up to the
+    /// series, is still one change.
+    func testRefilingAtAnotherLevelIsStillOneChange() throws {
+        let seriesFolder = root.appendingPathComponent("Show")
+        let seasonFolder = seriesFolder.appendingPathComponent("Season 1")
+        let episode = Episode(file: seasonFolder.appendingPathComponent("Show S01E03.mkv"), season: 1, number: 3)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let series = Series(name: "Show", folder: seriesFolder, seasons: [season])
+        let result = LibraryScanResult(root: root, series: [series])
+        let located = try XCTUnwrap(result.locate(episode: episode.id))
+        let folder = try XCTUnwrap(ExtrasFolder.named("interviews"))
+
+        var set = ChangeSet()
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: folder)), for: located.entityRef)
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: series, folder: folder)), for: located.entityRef)
+
+        XCTAssertEqual(set.count, 1)
+        let filing = try XCTUnwrap(set.pendingFilings(in: result).first)
+        XCTAssertEqual(filing.owner, .series)
+        XCTAssertEqual(filing.destination, seriesFolder.appendingPathComponent("interviews/Show S01E03.mkv"))
+    }
+
+    func testCancellingAFilingPutsTheEpisodeBack() throws {
+        let seasonFolder = root.appendingPathComponent("Show/Season 1")
+        let episode = Episode(file: seasonFolder.appendingPathComponent("Show S01E01.mkv"), season: 1, number: 1)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let result = LibraryScanResult(
+            root: root,
+            series: [Series(name: "Show", folder: root.appendingPathComponent("Show"), seasons: [season])]
+        )
+        let located = try XCTUnwrap(result.locate(episode: episode.id))
+        let folder = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+
+        var set = ChangeSet()
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: folder)), for: located.entityRef)
+
+        XCTAssertEqual(set.removeFilings(forEntityID: episode.id).count, 1)
+        XCTAssertTrue(set.isEmpty, "nothing was applied, so undoing the decision is the whole of the change")
+
+        let projected = try XCTUnwrap(result.applyingPendingFilings(set.pendingFilings(in: result)).series.first)
+        XCTAssertEqual(projected.seasons.first?.episodes.map(\.number), [1], "and the episode is an episode again")
+        XCTAssertTrue(projected.seasons.first?.extras.isEmpty ?? false)
+
+        XCTAssertTrue(
+            set.removeFilings(forEntityID: episode.id).isEmpty,
+            "an episode with nothing queued reports nothing removed, so a drop meaning nothing can be refused"
+        )
+    }
+
+    func testSupersedingLeavesOtherChangesToTheSameEpisodeAlone() throws {
+        let seasonFolder = root.appendingPathComponent("Season 1")
+        let episode = Episode(file: seasonFolder.appendingPathComponent("Show S01E03.mkv"), season: 1, number: 3)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [episode])
+        let entity = EntityRef(id: episode.id, level: .episode, label: "S01E03")
+        let folder = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+
+        var set = ChangeSet()
+        set.add(action("something else"), to: entity)
+        set.file(try XCTUnwrap(ExtrasFiling.action(episode: episode, in: season, folder: folder)), for: entity)
+        set.removeFilings(forEntityID: episode.id)
+
+        XCTAssertEqual(
+            set.actions(for: entity).map(\.title),
+            ["something else"],
+            "only the filing is a decision a later filing revises"
+        )
+    }
+
     // MARK: - Projecting the queue back onto the library
 
     func testAQueuedFilingProjectsOntoTheSeasonThatHoldsTheEpisode() throws {
