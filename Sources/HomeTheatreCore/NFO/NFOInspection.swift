@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import Foundation
 
 /// What a tag does, so a reader can tell structure from description at a glance.

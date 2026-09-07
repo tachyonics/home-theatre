@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import Foundation
 
 /// How Emby orders a series' episodes, from the series-level `<displayorder>` tag.

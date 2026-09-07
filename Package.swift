@@ -1,4 +1,7 @@
 // swift-tools-version: 6.0
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import PackageDescription
 
 let package = Package(

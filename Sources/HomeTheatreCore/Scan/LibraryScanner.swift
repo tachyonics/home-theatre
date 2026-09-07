@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import Foundation
 
 /// Walks a TV library and reconstructs the structure Emby would derive from it.
