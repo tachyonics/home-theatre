@@ -29,6 +29,10 @@ struct ContentView: View {
     /// the user was looking at.
     @State private var selectedExtra: URL?
     @State private var selectedEpisode: URL?
+    /// A season extra picked out of the episode column. Alongside the episode
+    /// selection the way ``selectedExtra`` sits alongside the season's, except
+    /// that these two share one list, so choosing either clears the other.
+    @State private var selectedSeasonExtra: URL?
     @State private var showingReport = false
 
     /// Which column was last interacted with.
@@ -111,7 +115,8 @@ struct ContentView: View {
                     pending: pendingByDestination,
                     selection: episodeSelection,
                     focusedColumn: $focusedColumn,
-                    restoreToSeason: restoreToSeason
+                    restoreToSeason: restoreToSeason,
+                    fileAsSeasonExtra: { fileAsExtra(episodeID: $0, folder: $1, under: .season) }
                 )
             }
             .navigationSplitViewStyle(.balanced)
@@ -203,6 +208,7 @@ struct ContentView: View {
                 .seasons.first?.number
             selectedExtra = nil
             selectedEpisode = nil
+            selectedSeasonExtra = nil
         }
     }
 
@@ -220,6 +226,7 @@ struct ContentView: View {
                 selectedSeason = number
                 selectedExtra = nil
                 selectedEpisode = nil
+                selectedSeasonExtra = nil
             case .extra(let file):
                 // The season stays as it was: the episode pane is not what the
                 // user was changing, and emptying it would cost them their place.
@@ -230,12 +237,27 @@ struct ContentView: View {
         }
     }
 
-    private var episodeSelection: Binding<URL?> {
+    private var episodeSelection: Binding<EpisodeSelection?> {
         Binding {
-            selectedEpisode
+            // An extra that has stopped existing leaves nothing selected rather
+            // than highlighting a row that is no longer there.
+            if currentSeasonExtra != nil, let selectedSeasonExtra { return .extra(selectedSeasonExtra) }
+            return selectedEpisode.map(EpisodeSelection.episode)
         } set: { newValue in
-            selectedEpisode = newValue
-            focus = newValue == nil ? .season : .episode
+            switch newValue {
+            case .episode(let file):
+                selectedEpisode = file
+                selectedSeasonExtra = nil
+                focus = .episode
+            case .extra(let file):
+                selectedSeasonExtra = file
+                selectedEpisode = nil
+                focus = .episode
+            case nil:
+                selectedEpisode = nil
+                selectedSeasonExtra = nil
+                focus = .season
+            }
         }
     }
 
@@ -272,6 +294,22 @@ struct ContentView: View {
         return OwnedExtra(extra: extra, ownerLabel: ExtraCollector.seriesLabel, isDirect: true)
     }
 
+    /// The selected season extra, labelled the way a collected one is. Read from
+    /// the scanned season rather than the resolved one: display ordering is about
+    /// episodes, and an extra hangs off the season that holds it.
+    private var currentSeasonExtra: OwnedExtra? {
+        guard let selectedSeasonExtra,
+              let number = currentSeason?.number,
+              let scanned = currentSeries?.series.seasons.first(where: { $0.number == number }),
+              let extra = scanned.extras.first(where: { $0.file == selectedSeasonExtra })
+        else { return nil }
+        return OwnedExtra(
+            extra: extra,
+            ownerLabel: ExtraCollector.seasonLabel(scanned.number),
+            isDirect: true
+        )
+    }
+
     /// The item the browsing columns have selected: follows the focused column,
     /// falling back outward when the focused level has nothing selected.
     private var itemTarget: InspectorTarget? {
@@ -297,6 +335,9 @@ struct ContentView: View {
     private var inspectorTarget: InspectorTarget? {
         if focus == .season, let currentSeriesExtra {
             return .extra(currentSeriesExtra)
+        }
+        if focus == .episode, let currentSeasonExtra {
+            return .extra(currentSeasonExtra)
         }
         return itemTarget
     }
@@ -618,6 +659,7 @@ struct ContentView: View {
                 selectedSeason = defaultSeason
                 selectedExtra = nil
                 selectedEpisode = nil
+                selectedSeasonExtra = nil
                 focus = .series
             case .failure(let error):
                 payload = nil
