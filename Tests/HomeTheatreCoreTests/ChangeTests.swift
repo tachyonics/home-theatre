@@ -478,6 +478,116 @@ final class ChangeTests: XCTestCase {
         )
     }
 
+    // MARK: - Keeping up with what has been applied
+
+    func testTheEntityBehindAnActionIsFindable() {
+        let entity = EntityRef(id: UUID(), level: .episode, label: "S01E03")
+        let queued = action("a")
+
+        var set = ChangeSet()
+        set.add(queued, to: entity)
+
+        XCTAssertEqual(set.entity(owningActionID: queued.id)?.id, entity.id)
+        XCTAssertNil(set.entity(owningActionID: UUID()), "an unknown action belongs to nothing")
+    }
+
+    /// Applying moves files without re-reading the tree, so the scan the browser
+    /// draws from goes stale the moment a change is carried out. Advancing it with
+    /// the projection it was already drawing has to land on exactly what a rescan
+    /// would have found — otherwise the browser would be confidently wrong until
+    /// the next scan.
+    func testTheModelCanBeAdvancedPastAnAppliedFilingWithoutRescanning() throws {
+        let series = root.appendingPathComponent("Doctor Who (2005)")
+        try touch("Doctor Who (2005)/tvshow.nfo", bytes: "<tvshow><title>Doctor Who</title></tvshow>")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E01.mkv")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E01.nfo", bytes: "<episodedetails><season>1</season><episode>1</episode></episodedetails>")
+        try touch("Doctor Who (2005)/Season 1/Doctor Who S01E02.mkv")
+
+        let before = try LibraryScanner().scan(root: series)
+        let episode = try XCTUnwrap(before.series.first?.seasons.first?.episodes.first { $0.number == 1 })
+        let located = try XCTUnwrap(before.locate(episode: episode.id))
+        let folder = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+        let action = try XCTUnwrap(ExtrasFiling.action(episode: located.episode, in: located.season, folder: folder))
+
+        // What the store does: the action leaves the queue on success and is kept
+        // under the same entity, for the model to be advanced past.
+        var queue = ChangeSet()
+        queue.add(action, to: located.entityRef)
+        var applied = ChangeSet()
+        applied.add(action, to: try XCTUnwrap(queue.entity(owningActionID: action.id)))
+        queue.remove(actionID: action.id)
+
+        guard case .success = ChangeExecutor.apply(action) else {
+            return XCTFail("\(action.title) failed")
+        }
+        XCTAssertTrue(queue.isEmpty, "the change is no longer pending, so nothing projects it any more")
+
+        let advanced = before.applyingPendingFilings(applied.pendingFilings(in: before))
+        let rescanned = try LibraryScanner().scan(root: series)
+
+        let advancedSeason = try XCTUnwrap(advanced.series.first?.seasons.first)
+        let rescannedSeason = try XCTUnwrap(rescanned.series.first?.seasons.first)
+        XCTAssertEqual(advancedSeason.episodes.map(\.number), rescannedSeason.episodes.map(\.number))
+        XCTAssertEqual(advancedSeason.extras, rescannedSeason.extras)
+
+        XCTAssertNotEqual(
+            advancedSeason.episodes.count,
+            before.series.first?.seasons.first?.episodes.count,
+            "and it is not simply the scan it started from"
+        )
+
+        let again = advanced.applyingPendingFilings(applied.pendingFilings(in: advanced))
+        XCTAssertEqual(again.series.first?.seasons.first?.episodes.map(\.number), advancedSeason.episodes.map(\.number))
+        XCTAssertEqual(
+            again.series.first?.seasons.first?.extras,
+            advancedSeason.extras,
+            "advancing past the same applied change twice must add nothing the second time"
+        )
+    }
+
+    /// Applying one change while others wait is the ordinary case, and the queue
+    /// that is left has to keep projecting — onto the model as it now is, not the
+    /// scan it was made against.
+    func testAChangeStillQueuedProjectsOntoTheAdvancedModel() throws {
+        let seasonFolder = root.appendingPathComponent("Show/Season 1")
+        let first = Episode(file: seasonFolder.appendingPathComponent("Show S01E01.mkv"), season: 1, number: 1)
+        let second = Episode(file: seasonFolder.appendingPathComponent("Show S01E02.mkv"), season: 1, number: 2)
+        let season = Season(number: 1, folder: seasonFolder, episodes: [first, second])
+        let result = LibraryScanResult(
+            root: root,
+            series: [Series(name: "Show", folder: root.appendingPathComponent("Show"), seasons: [season])]
+        )
+
+        let featurettes = try XCTUnwrap(ExtrasFolder.named("featurettes"))
+        let interviews = try XCTUnwrap(ExtrasFolder.named("interviews"))
+        let one = try XCTUnwrap(result.locate(episode: first.id))
+        let two = try XCTUnwrap(result.locate(episode: second.id))
+
+        var queue = ChangeSet()
+        queue.file(try XCTUnwrap(ExtrasFiling.action(episode: first, in: season, folder: featurettes)), for: one.entityRef)
+        let stillQueued = try XCTUnwrap(ExtrasFiling.action(episode: second, in: season, folder: interviews))
+        queue.file(stillQueued, for: two.entityRef)
+
+        // Apply the first: it leaves the queue and the model moves on past it.
+        var applied = ChangeSet()
+        let carriedOut = try XCTUnwrap(queue.filings(forEntityID: first.id).first)
+        applied.add(carriedOut, to: one.entityRef)
+        queue.remove(actionID: carriedOut.id)
+
+        let advanced = result.applyingPendingFilings(applied.pendingFilings(in: result))
+
+        let remaining = queue.pendingFilings(in: advanced)
+        XCTAssertEqual(remaining.map(\.episode.id), [second.id], "the change still queued must still find its episode")
+
+        let shown = try XCTUnwrap(advanced.applyingPendingFilings(remaining).series.first?.seasons.first)
+        XCTAssertTrue(shown.episodes.isEmpty, "both are out of the season — one applied, one previewed")
+        XCTAssertEqual(
+            Set(shown.extras.map(\.folderName)),
+            ["featurettes", "interviews"],
+            "the applied one is kept and the queued one is previewed on top of it"
+        )
+    }
+
     // MARK: - Executing
 
     func testApplyingCreatesTheExtrasFolderAndMovesTheFile() throws {

@@ -137,6 +137,18 @@ public struct ChangeSet: Sendable, Codable {
         actionsByEntity[id] ?? []
     }
 
+    /// The entity one action was queued against.
+    ///
+    /// An action alone does not say what it is about — its steps name files, and
+    /// the entity is what turns those back into "this episode". Applying hands back
+    /// only the action, so this is how the applied action is filed under the same
+    /// entity it was queued under.
+    public func entity(owningActionID id: UUID) -> EntityRef? {
+        entities.first { entity in
+            actions(forEntityID: entity.id).contains { $0.id == id }
+        }
+    }
+
     /// The filings queued for one entity. At most one after any call to
     /// ``file(_:for:)``, but read as a list so nothing has to assume that.
     public func filings(forEntityID id: UUID) -> [PendingAction] {

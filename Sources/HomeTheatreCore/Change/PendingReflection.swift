@@ -117,8 +117,15 @@ extension LibraryScanResult {
     ///
     /// Entity ids are carried across, so a projected library still answers
     /// ``locate(episode:)`` for everything that has not been filed. Queueing must
-    /// still be done against the real scan: this one describes a disk that does not
-    /// exist yet, and steps built from it would move files that are not there.
+    /// still be done against the real scan while a filing is only queued: that
+    /// projection describes a disk that does not exist yet, and steps built from it
+    /// would move files that are not there.
+    ///
+    /// The same call also advances the model *past* a filing that has been applied,
+    /// where the disk now looks exactly like this and the result can be kept. One
+    /// expression serves both because the preview was built to equal what a rescan
+    /// finds — which is what makes carrying it forward sound rather than a guess,
+    /// and is asserted in the tests.
     public func applyingPendingFilings(_ filings: [PendingFiling]) -> LibraryScanResult {
         guard !filings.isEmpty else { return self }
 

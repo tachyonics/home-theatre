@@ -171,6 +171,7 @@ struct ContentView: View {
         .onChange(of: focusedColumn) { _, moved in
             if let moved { focus = moved }
         }
+        .onChange(of: store.appliedCount) { advancePastAppliedChanges() }
         .task(id: payloadStamp) { loadInspection() }
         .task {
             // Development affordance: HT_LIBRARY=<path> loads a tree at launch so
@@ -469,6 +470,39 @@ struct ContentView: View {
         // A new folder gets a fresh detection rather than inheriting the last override.
         modeSelection = .auto
         requestScan(url)
+    }
+
+    /// Moves the scan on to the disk as it now is, once a change has been applied.
+    ///
+    /// Applying moves files; it does not re-read the tree. The scan behind the
+    /// browser still describes where everything was, and the queue that was
+    /// projecting the difference has just lost the action — so without this the
+    /// change would appear to undo itself the moment it was carried out.
+    ///
+    /// It is the same projection the browser was already drawing, kept rather than
+    /// recomputed from a preview: the extra it produces was built to equal what a
+    /// rescan finds, so adopting it is exact and costs no filesystem work. A rescan
+    /// would also reissue every entity id and take the rest of the queue with it,
+    /// which is precisely what must not happen while other changes are still
+    /// waiting to be applied.
+    ///
+    /// Idempotent: a filing already folded in names an episode this model no longer
+    /// has, so it resolves to nothing and is skipped. Actions carrying no intent
+    /// change nothing here — nothing in the browser was previewing them either.
+    private func advancePastAppliedChanges() {
+        guard let current = payload else { return }
+        let filings = store.applied.pendingFilings(in: current.result)
+        guard !filings.isEmpty else { return }
+
+        let advanced = current.result.applyingPendingFilings(filings)
+        let resolver = DisplayOrderResolver()
+        payload = ScanPayload(
+            result: advanced,
+            resolved: advanced.series.map(resolver.resolve),
+            // Regenerated with the rest: a report describing the tree before the
+            // change would be a stale answer to "what is on disk".
+            reportText: LibraryReport().render(advanced)
+        )
     }
 
     /// Read on demand rather than retained from the scan: the file is small, and
