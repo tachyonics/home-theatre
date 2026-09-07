@@ -90,6 +90,13 @@ struct SeasonColumn: View {
     /// as somewhere a file can be dropped.
     @State private var dropTarget: ExtraType?
 
+    @State private var extrasExpanded = true
+
+    /// Which type groups are shut, rather than which are open: everything starts
+    /// open, so the default needs no entry, and a type that only appears once
+    /// something is filed as it cannot arrive already hidden.
+    @State private var collapsedTypes: Set<ExtraType> = []
+
     var body: some View {
         Group {
             if let series {
@@ -142,35 +149,76 @@ struct SeasonColumn: View {
     /// point of listing them against the series.
     @ViewBuilder
     private func seriesExtras(of series: ResolvedSeries) -> some View {
-        Section("Series extras") {
-            ForEach(types(in: series), id: \.self) { type in
-                ExtraTypeHeading(type: type, count: extras(of: type, in: series).count)
-                    .listRowBackground(highlight(type))
-                    // A heading names a group, so it cannot also be a thing to
-                    // select — clicking it would leave the details drawer
-                    // describing nothing.
-                    .selectionDisabled()
-                    .help(helpText(for: type))
-                    .dropDestination(for: String.self) { items, _ in
-                        drop(items, as: type)
-                    } isTargeted: { over in
-                        dropTarget = over ? type : nil
-                    }
-
-                ForEach(extras(of: type, in: series), id: \.file) { extra in
-                    extraRow(extra)
-                        .tag(SeasonSelection.extra(extra.file))
-                        .listRowBackground(highlight(type))
-                        // The rows take a drop too: the group is one target, and
-                        // aiming at the heading of a long list would mean
-                        // scrolling back to it.
-                        .dropDestination(for: String.self) { items, _ in
-                            drop(items, as: type)
-                        } isTargeted: { over in
-                            dropTarget = over ? type : nil
-                        }
-                }
+        // Two levels of collapse, because there are two things worth getting out
+        // of the way: the whole list, when you are working on seasons, and one
+        // kind of extra, when the series has thirty trailers and you are not
+        // looking at trailers. Both leave their heading, so what has been folded
+        // away still says what it is and how much of it there is.
+        // The heading is a control of our own rather than `Section(isExpanded:)`:
+        // that draws no disclosure control at all in this list's style, leaving a
+        // section that collapses only if you know it does. Built here, both levels
+        // fold the same way and look it.
+        Section {
+            if extrasExpanded {
+                extraTypeGroups(of: series)
             }
+        } header: {
+            SeriesExtrasHeading(
+                count: series.series.extras.count,
+                isCollapsed: !extrasExpanded,
+                toggle: { withAnimation(.snappy(duration: 0.15)) { extrasExpanded.toggle() } }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func extraTypeGroups(of series: ResolvedSeries) -> some View {
+        ForEach(types(in: series), id: \.self) { type in
+                let extras = extras(of: type, in: series)
+
+                ExtraTypeHeading(
+                    type: type,
+                    count: extras.count,
+                    isCollapsed: collapsedTypes.contains(type),
+                    // Nothing to hide, so no control that pretends otherwise. The
+                    // heading is still a destination — that is what an empty group
+                    // is for.
+                    isCollapsible: !extras.isEmpty,
+                    toggle: { toggle(type) }
+                )
+                .listRowBackground(highlight(type))
+                // A heading names a group, so it cannot also be a thing to
+                // select — clicking it would leave the details drawer
+                // describing nothing.
+                .selectionDisabled()
+                .help(helpText(for: type))
+                .dropDestination(for: String.self) { items, _ in
+                    drop(items, as: type)
+                } isTargeted: { over in
+                    dropTarget = over ? type : nil
+                }
+
+                if !collapsedTypes.contains(type) {
+                    ForEach(extras, id: \.file) { extra in
+                        extraRow(extra)
+                            .tag(SeasonSelection.extra(extra.file))
+                            .listRowBackground(highlight(type))
+                            // The rows take a drop too: the group is one target,
+                            // and aiming at the heading of a long list would mean
+                            // scrolling back to it.
+                            .dropDestination(for: String.self) { items, _ in
+                                drop(items, as: type)
+                            } isTargeted: { over in
+                                dropTarget = over ? type : nil
+                            }
+                    }
+                }
+        }
+    }
+
+    private func toggle(_ type: ExtraType) {
+        withAnimation(.snappy(duration: 0.15)) {
+            if collapsedTypes.remove(type) == nil { collapsedTypes.insert(type) }
         }
     }
 
@@ -217,8 +265,14 @@ struct SeasonColumn: View {
         // The payload is an entity id. Anything else dragged in from outside
         // simply resolves to nothing and is refused, which is why no custom
         // UTType is needed.
-        return items.compactMap(UUID.init(uuidString:))
+        let filed = items.compactMap(UUID.init(uuidString:))
             .reduce(false) { fileAsSeriesExtra($1, folder) || $0 }
+
+        // A group that was shut opens to show what just landed in it. Filing
+        // something and watching the count tick up while the thing itself stays
+        // hidden is the one moment the fold is in the way.
+        if filed { collapsedTypes.remove(type) }
+        return filed
     }
 
     /// The whole group lights up, heading and rows together, since dropping on any
@@ -235,14 +289,57 @@ struct SeasonColumn: View {
     }
 }
 
-/// Names one group of extras and how many are in it — and is the drop target for
-/// making another one.
+/// Names the whole list and how many extras are in it, and folds it away. Reads as
+/// a section header because it is one — the control is what the style would not
+/// give us.
+private struct SeriesExtrasHeading: View {
+    let count: Int
+    let isCollapsed: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .frame(width: 9)
+                Text("Series extras")
+                Spacer()
+                Text("\(count)")
+                    .monospacedDigit()
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Names one group of extras and how many are in it — and is both the drop target
+/// for making another one and the control that folds the group away.
 private struct ExtraTypeHeading: View {
     let type: ExtraType
     let count: Int
+    let isCollapsed: Bool
+    let isCollapsible: Bool
+    let toggle: () -> Void
 
     var body: some View {
+        Button(action: toggle) { label }
+            .buttonStyle(.plain)
+            .disabled(!isCollapsible)
+    }
+
+    private var label: some View {
         HStack(spacing: 6) {
+            // Held open even when there is nothing to disclose, so the headings
+            // line up as one column rather than stepping in and out.
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                .opacity(isCollapsible ? 1 : 0)
+                .frame(width: 9)
+
             Text(type.displayName.uppercased())
                 .font(.caption2)
                 .fontWeight(.semibold)
