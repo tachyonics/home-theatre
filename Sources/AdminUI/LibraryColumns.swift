@@ -86,17 +86,6 @@ struct SeasonColumn: View {
     /// against.
     let fileAsSeriesExtra: (UUID, ExtrasFolder) -> Bool
 
-    /// Highlighted while a drag is over it, so a type holding nothing still reads
-    /// as somewhere a file can be dropped.
-    @State private var dropTarget: ExtraType?
-
-    @State private var extrasExpanded = true
-
-    /// Which type groups are shut, rather than which are open: everything starts
-    /// open, so the default needs no entry, and a type that only appears once
-    /// something is filed as it cannot arrive already hidden.
-    @State private var collapsedTypes: Set<ExtraType> = []
-
     var body: some View {
         Group {
             if let series {
@@ -110,7 +99,14 @@ struct SeasonColumn: View {
 
                     // Extras and unplaced files belong to the series rather than to
                     // any season, so they live here instead of in the episode pane.
-                    seriesExtras(of: series)
+                    ExtrasByType(
+                        title: "Series extras",
+                        ownerDescription: "the series",
+                        extras: series.series.extras,
+                        pending: pending,
+                        tag: { SeasonSelection.extra($0.file) },
+                        fileAsExtra: fileAsSeriesExtra
+                    )
 
                     if !series.series.unassigned.isEmpty {
                         Section("Unassigned") {
@@ -135,226 +131,6 @@ struct SeasonColumn: View {
         series.series.seasons.first { $0.number == number }
     }
 
-    // MARK: - Series extras
-
-    /// The series' own extras, under a heading per type they can be filed as.
-    ///
-    /// Every filable type gets a heading whether or not it holds anything, the same
-    /// way the extras pane keeps every folder Emby recognises: the heading is also
-    /// where an episode is dropped to make it that kind of extra, and hiding the
-    /// empty ones would leave no way to file the first one.
-    ///
-    /// Only the series' *own* extras are here — nothing gathered from the seasons
-    /// or episodes below it — because saying whose extras these are is the whole
-    /// point of listing them against the series.
-    @ViewBuilder
-    private func seriesExtras(of series: ResolvedSeries) -> some View {
-        // Two levels of collapse, because there are two things worth getting out
-        // of the way: the whole list, when you are working on seasons, and one
-        // kind of extra, when the series has thirty trailers and you are not
-        // looking at trailers. Both leave their heading, so what has been folded
-        // away still says what it is and how much of it there is.
-        // The heading is a control of our own rather than `Section(isExpanded:)`:
-        // that draws no disclosure control at all in this list's style, leaving a
-        // section that collapses only if you know it does. Built here, both levels
-        // fold the same way and look it.
-        Section {
-            if extrasExpanded {
-                extraTypeGroups(of: series)
-            }
-        } header: {
-            SeriesExtrasHeading(
-                count: series.series.extras.count,
-                isCollapsed: !extrasExpanded,
-                toggle: { withAnimation(.snappy(duration: 0.15)) { extrasExpanded.toggle() } }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func extraTypeGroups(of series: ResolvedSeries) -> some View {
-        ForEach(types(in: series), id: \.self) { type in
-                let extras = extras(of: type, in: series)
-
-                ExtraTypeHeading(
-                    type: type,
-                    count: extras.count,
-                    isCollapsed: collapsedTypes.contains(type),
-                    // Nothing to hide, so no control that pretends otherwise. The
-                    // heading is still a destination — that is what an empty group
-                    // is for.
-                    isCollapsible: !extras.isEmpty,
-                    toggle: { toggle(type) }
-                )
-                .listRowBackground(highlight(type))
-                // A heading names a group, so it cannot also be a thing to
-                // select — clicking it would leave the details drawer
-                // describing nothing.
-                .selectionDisabled()
-                .help(helpText(for: type))
-                .dropDestination(for: String.self) { items, _ in
-                    drop(items, as: type)
-                } isTargeted: { over in
-                    dropTarget = over ? type : nil
-                }
-
-                if !collapsedTypes.contains(type) {
-                    ForEach(extras, id: \.file) { extra in
-                        extraRow(extra)
-                            .tag(SeasonSelection.extra(extra.file))
-                            .listRowBackground(highlight(type))
-                            // The rows take a drop too: the group is one target,
-                            // and aiming at the heading of a long list would mean
-                            // scrolling back to it.
-                            .dropDestination(for: String.self) { items, _ in
-                                drop(items, as: type)
-                            } isTargeted: { over in
-                                dropTarget = over ? type : nil
-                            }
-                    }
-                }
-        }
-    }
-
-    private func toggle(_ type: ExtraType) {
-        withAnimation(.snappy(duration: 0.15)) {
-            if collapsedTypes.remove(type) == nil { collapsedTypes.insert(type) }
-        }
-    }
-
-    /// An extra that is only queued stays draggable, because the decision that put
-    /// it here is still a decision — it can be moved to another type, or dropped
-    /// back on the season to be an episode again. What is dragged is the episode
-    /// id, exactly as when it left the season: the queue is superseded rather than
-    /// added to, so the second drop describes the same move from the same start.
-    ///
-    /// An extra already on disk carries no such id and stays put. Moving one is a
-    /// different change — nothing about it says which episode, if any, it once was.
-    @ViewBuilder
-    private func extraRow(_ extra: Extra) -> some View {
-        let row = ExtraRow(extra: extra, filing: pending[extra.file], showsType: false)
-            .padding(.leading, 14)
-
-        if let filing = pending[extra.file] {
-            row.draggable(filing.episode.id.uuidString)
-        } else {
-            row
-        }
-    }
-
-    /// Every type that can be filed, plus any that is present without being one —
-    /// a list claiming to show the series' extras must not quietly leave one out
-    /// because there is nowhere to drop a new one of its kind.
-    private func types(in series: ResolvedSeries) -> [ExtraType] {
-        var types = ExtraType.filable
-        for extra in series.series.extras where !types.contains(extra.type) {
-            types.append(extra.type)
-        }
-        return types
-    }
-
-    /// Grouped by type rather than by folder: `extras/` and `specials/` both hold
-    /// ``ExtraType/unknown`` extras, and to a client they are the same kind of
-    /// thing however they were filed.
-    private func extras(of type: ExtraType, in series: ResolvedSeries) -> [Extra] {
-        series.series.extras.filter { $0.type == type }
-    }
-
-    private func drop(_ items: [String], as type: ExtraType) -> Bool {
-        guard let folder = type.canonicalFolder else { return false }
-        // The payload is an entity id. Anything else dragged in from outside
-        // simply resolves to nothing and is refused, which is why no custom
-        // UTType is needed.
-        let filed = items.compactMap(UUID.init(uuidString:))
-            .reduce(false) { fileAsSeriesExtra($1, folder) || $0 }
-
-        // A group that was shut opens to show what just landed in it. Filing
-        // something and watching the count tick up while the thing itself stays
-        // hidden is the one moment the fold is in the way.
-        if filed { collapsedTypes.remove(type) }
-        return filed
-    }
-
-    /// The whole group lights up, heading and rows together, since dropping on any
-    /// of them does the same thing.
-    private func highlight(_ type: ExtraType) -> Color {
-        dropTarget == type ? Color.accentColor.opacity(0.25) : Color.clear
-    }
-
-    private func helpText(for type: ExtraType) -> String {
-        guard let folder = type.canonicalFolder else {
-            return "Extras of this kind are bound by a filename suffix, so nothing can be filed here."
-        }
-        return "Drop an episode here to move it into the series' “\(folder.name)” folder, which makes it a \(type.displayName) extra."
-    }
-}
-
-/// Names the whole list and how many extras are in it, and folds it away. Reads as
-/// a section header because it is one — the control is what the style would not
-/// give us.
-private struct SeriesExtrasHeading: View {
-    let count: Int
-    let isCollapsed: Bool
-    let toggle: () -> Void
-
-    var body: some View {
-        Button(action: toggle) {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption2)
-                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                    .frame(width: 9)
-                Text("Series extras")
-                Spacer()
-                Text("\(count)")
-                    .monospacedDigit()
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Names one group of extras and how many are in it — and is both the drop target
-/// for making another one and the control that folds the group away.
-private struct ExtraTypeHeading: View {
-    let type: ExtraType
-    let count: Int
-    let isCollapsed: Bool
-    let isCollapsible: Bool
-    let toggle: () -> Void
-
-    var body: some View {
-        Button(action: toggle) { label }
-            .buttonStyle(.plain)
-            .disabled(!isCollapsible)
-    }
-
-    private var label: some View {
-        HStack(spacing: 6) {
-            // Held open even when there is nothing to disclose, so the headings
-            // line up as one column rather than stepping in and out.
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                .opacity(isCollapsible ? 1 : 0)
-                .frame(width: 9)
-
-            Text(type.displayName.uppercased())
-                .font(.caption2)
-                .fontWeight(.semibold)
-            Spacer()
-            Text("\(count)")
-                .font(.caption2)
-                .monospacedDigit()
-        }
-        // Dimmed to a third level when empty: the heading is still a destination,
-        // but it should not read as loudly as one holding something.
-        .foregroundStyle(count == 0 ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-        .padding(.top, 2)
-        // The row is the target, not just the text sitting in it.
-        .contentShape(.rect)
-    }
 }
 
 private struct SeasonRow: View {
@@ -392,6 +168,14 @@ private struct SeasonRow: View {
 
 // MARK: - Episodes
 
+/// What the episode column has selected — an episode, or one of the season's
+/// extras. Two kinds of thing in one list, for the same reason as
+/// ``SeasonSelection``.
+enum EpisodeSelection: Hashable {
+    case episode(URL)
+    case extra(URL)
+}
+
 struct EpisodeColumn: View {
     let series: ResolvedSeries?
     let season: ResolvedSeason?
@@ -400,12 +184,14 @@ struct EpisodeColumn: View {
     /// where applying will actually put it — so this is only ever read to badge the
     /// extra it became.
     let pending: [URL: PendingFiling]
-    @Binding var selection: URL?
+    @Binding var selection: EpisodeSelection?
     @FocusState.Binding var focusedColumn: ColumnFocus?
     /// Cancels the queued filing that took an episode out of this season, putting
     /// it back among the episodes. Returns false when the id names nothing queued,
     /// or something queued out of a different season.
     let restoreToSeason: (UUID) -> Bool
+    /// Queues the moves that make a dragged episode an extra of *this season*.
+    let fileAsSeasonExtra: (UUID, ExtrasFolder) -> Bool
 
     /// Highlighted while a drag is over the list, since the target here is the
     /// season as a whole rather than any one row in it.
@@ -418,20 +204,24 @@ struct EpisodeColumn: View {
                     Section("Display order") {
                         ForEach(season.episodes, id: \.episode.file) { resolved in
                             EpisodeRow(resolved: resolved, pending: pending)
-                                .tag(resolved.episode.file)
+                                .tag(EpisodeSelection.episode(resolved.episode.file))
                                 // The entity id, not the path: where the file sits
                                 // is exactly what a drop is about to change.
                                 .draggable(resolved.episode.id.uuidString)
                         }
                     }
 
-                    if let extras = seasonExtras, !extras.isEmpty {
-                        Section("Season extras") {
-                            ForEach(extras, id: \.file) { extra in
-                                ExtraRow(extra: extra, filing: pending[extra.file])
-                            }
-                        }
-                    }
+                    // Shown whether or not the season has any: the headings are
+                    // where an episode is dropped to become that kind of extra,
+                    // and an empty one is exactly when that matters.
+                    ExtrasByType(
+                        title: "Season extras",
+                        ownerDescription: "this season",
+                        extras: seasonExtras ?? [],
+                        pending: pending,
+                        tag: { EpisodeSelection.extra($0.file) },
+                        fileAsExtra: fileAsSeasonExtra
+                    )
                 }
                 .listStyle(.inset)
                 .focused($focusedColumn, equals: .episode)
@@ -532,40 +322,6 @@ private struct EpisodeRow: View {
             }
             if resolved.episode.nfoURL == nil {
                 Badge("no nfo", tone: .warning)
-            }
-        }
-    }
-}
-
-// MARK: - Shared rows
-
-private struct ExtraRow: View {
-    let extra: Extra
-    /// Set when this extra is one a queued filing will produce, rather than one
-    /// that is already on disk.
-    var filing: PendingFiling? = nil
-    /// False where the list is already grouped by type, and repeating it on every
-    /// row would say the same thing twice.
-    var showsType = true
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "paperclip")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            if showsType {
-                Text(extra.type.displayName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            // Extras carry no NFO, so this filename is the on-screen title.
-            Text(extra.title)
-                .font(.caption)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let filing {
-                Badge("Pending", tone: .pending)
-                    .help("\(filing.action.title) \(filing.action.detail) — queued, not yet applied.")
             }
         }
     }
