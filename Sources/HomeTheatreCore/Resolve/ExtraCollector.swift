@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import Foundation
 
 /// An extra together with what owns it, so a list gathered across levels can say

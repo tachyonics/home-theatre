@@ -146,3 +146,9 @@ From Emby's naming documentation, which does cover these:
 3. Plan / apply: file moves and NFO writes as a reviewable, journalled,
    idempotent operation list.
 4. Editing UI on top of a model that already round-trips.
+
+## Licence
+
+Apache 2.0 — see [LICENSE](LICENSE). Every Swift file carries an SPDX header, and
+`Scripts/check-license-headers.sh` enforces it in CI; a missing header is not a
+build error, so nothing else in the toolchain would notice.

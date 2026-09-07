@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 the home-silo project authors
+
 import Foundation
 
 /// Mirrors Emby/Jellyfin's `ExtraType` enum. Extras carry one of these; it is
