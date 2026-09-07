@@ -18,6 +18,20 @@ final class ChangeStore {
     /// can explain itself rather than the whole queue reporting one banner.
     private(set) var failures: [UUID: String] = [:]
 
+    /// What has been carried out since the scan was taken.
+    ///
+    /// An applied action leaves the queue but the disk keeps its effect, and the
+    /// scan the browser draws from still describes the tree as it was before. So
+    /// the actions are kept, under the entities they were made against, for the
+    /// browser to advance its own model past — otherwise applying would look like
+    /// it had undone itself, the change vanishing from the queue and the library
+    /// snapping back to the state the user had just changed.
+    private(set) var applied = ChangeSet()
+
+    /// Changes on every successful apply, which is what a view watches to know its
+    /// model has fallen behind the disk.
+    var appliedCount: Int { applied.count }
+
     var isEmpty: Bool { changeSet.isEmpty }
     var count: Int { changeSet.count }
 
@@ -60,6 +74,7 @@ final class ChangeStore {
     /// against entity ids the new scan will not reissue.
     func removeAll() {
         changeSet.removeAll()
+        applied.removeAll()
         failures.removeAll()
     }
 
@@ -73,6 +88,10 @@ final class ChangeStore {
     func apply(_ action: PendingAction) -> Bool {
         switch ChangeExecutor.apply(action) {
         case .success:
+            // Recorded before the removal, which is what still knows the entity.
+            if let entity = changeSet.entity(owningActionID: action.id) {
+                applied.add(action, to: entity)
+            }
             changeSet.remove(actionID: action.id)
             failures[action.id] = nil
             return true
