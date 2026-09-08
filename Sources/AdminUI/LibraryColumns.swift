@@ -193,21 +193,48 @@ struct EpisodeColumn: View {
     /// Queues the moves that make a dragged episode an extra of *this season*.
     let fileAsSeasonExtra: (UUID, ExtrasFolder) -> Bool
 
-    /// Highlighted while a drag is over the list, since the target here is the
-    /// season as a whole rather than any one row in it.
-    @State private var isDropTargeted = false
+    /// Which row a drag is over, while it is over one. Identity rather than a
+    /// plain flag because rows hand off as the cursor crosses them, and the row
+    /// being left can report last — a flag would blink the highlight off partway
+    /// down the list.
+    @State private var restoreTarget: String?
 
     var body: some View {
         Group {
             if let season {
                 List(selection: $selection) {
                     Section("Display order") {
+                        // Filing the last episode away would otherwise leave
+                        // nothing here to aim at, and the decision that emptied the
+                        // season could not be taken back in the column it was taken
+                        // in.
+                        if season.episodes.isEmpty {
+                            Text("No episodes. Drop a queued extra here to make it an episode again.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(.rect)
+                                .selectionDisabled()
+                                .modifier(RestoreDrop(id: "empty", target: $restoreTarget, restore: restore))
+                        }
+
                         ForEach(season.episodes, id: \.episode.file) { resolved in
                             EpisodeRow(resolved: resolved, pending: pending)
                                 .tag(EpisodeSelection.episode(resolved.episode.file))
                                 // The entity id, not the path: where the file sits
                                 // is exactly what a drop is about to change.
                                 .draggable(resolved.episode.id.uuidString)
+                                // Dropping on an episode still says "this belongs in
+                                // the season" rather than anything about the episode
+                                // under the cursor, so every row does the same thing
+                                // and the whole list lights up to say so.
+                                .modifier(
+                                    RestoreDrop(
+                                        id: resolved.episode.file.path,
+                                        target: $restoreTarget,
+                                        restore: restore
+                                    )
+                                )
                         }
                     }
 
@@ -225,17 +252,15 @@ struct EpisodeColumn: View {
                 }
                 .listStyle(.inset)
                 .focused($focusedColumn, equals: .episode)
-                // The whole list, not a row: dropping here says "this belongs in
-                // the season", which is about the season and not about whichever
-                // episode the cursor happened to be over.
-                .dropDestination(for: String.self) { items, _ in
-                    items.compactMap(UUID.init(uuidString:))
-                        .reduce(false) { restoreToSeason($1) || $0 }
-                } isTargeted: { over in
-                    isDropTargeted = over
-                }
+                // The episode rows carry the drop, not the list around them: a drop
+                // destination on the list takes the drag before anything inside it
+                // can, and this list contains the season's extras, whose type
+                // headings are themselves destinations. With the list holding one,
+                // those headings never saw a drag at all — dropping an episode on
+                // "Trailers" arrived here instead, meant nothing, and was refused
+                // in silence.
                 .overlay {
-                    if isDropTargeted {
+                    if restoreTarget != nil {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(Color.accentColor, lineWidth: 2)
                             .padding(2)
@@ -256,9 +281,39 @@ struct EpisodeColumn: View {
         return season.number == 0 ? "Specials" : "Season \(season.number)"
     }
 
+    private func restore(_ items: [String]) -> Bool {
+        items.compactMap(UUID.init(uuidString:))
+            .reduce(false) { restoreToSeason($1) || $0 }
+    }
+
     private var seasonExtras: [Extra]? {
         guard let season, let series else { return nil }
         return series.series.seasons.first { $0.number == season.number }?.extras
+    }
+}
+
+/// Makes a row one of the places an episode goes back to its season.
+///
+/// One target spread over many rows: every row does the same thing, the whole
+/// list lights up whichever is under the cursor, and all a row contributes is
+/// somewhere to release the mouse. Written once so they cannot drift apart.
+private struct RestoreDrop: ViewModifier {
+    let id: String
+    @Binding var target: String?
+    let restore: ([String]) -> Bool
+
+    func body(content: Content) -> some View {
+        content.dropDestination(for: String.self) { items, _ in
+            restore(items)
+        } isTargeted: { over in
+            // Only the row that claimed the highlight may give it up, or the row
+            // being left would clear the one just entered.
+            if over {
+                target = id
+            } else if target == id {
+                target = nil
+            }
+        }
     }
 }
 
